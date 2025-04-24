@@ -1,4 +1,4 @@
-// weighty-containers/main.js
+// weighty-containers/main.js - Версия с доп. логами для renderItemSheet
 
 const MODULE_ID = 'weighty-containers';
 const FLAG_WEIGHT_REDUCTION = 'weightReduction';
@@ -13,7 +13,6 @@ let libWrapper;
  * @returns {boolean}
  */
 function isActualWeightContainer(item) {
-    // ... (без изменений) ...
     if (!item || item.type !== 'container' || !item.system) return false;
     const hasWeightValue = typeof item.system.capacity?.weight?.value === 'number' && item.system.capacity.weight.value >= 0;
     const typeIsWeight = item.system.capacity?.type === 'weight';
@@ -26,7 +25,6 @@ function isActualWeightContainer(item) {
  * @returns {number} Процент снижения (0-100).
  */
 function getWeightReductionPercent(containerItem) {
-    // ... (без изменений) ...
     if (!containerItem || typeof containerItem !== 'object' || !isActualWeightContainer(containerItem)) return 0;
     let flagValue = undefined;
     try { flagValue = containerItem.getFlag(MODULE_ID, FLAG_WEIGHT_REDUCTION); }
@@ -40,7 +38,6 @@ function getWeightReductionPercent(containerItem) {
  * @returns {number} Базовый вес.
  */
 function getBaseItemWeight(itemOrData) {
-    // ... (без изменений) ...
     if (!itemOrData) return 0;
     const weightSource = foundry.utils.getProperty(itemOrData, "system.weight");
     let baseWeight = 0;
@@ -60,7 +57,6 @@ function getBaseItemWeight(itemOrData) {
  * @returns {number} Эффективный вес.
  */
 function getEffectiveItemWeightInContainer(itemOrData, targetActor, targetContainer) {
-     // ... (без изменений) ...
      if (!itemOrData) return 0;
     const baseWeight = getBaseItemWeight(itemOrData);
     if (!targetContainer || !isActualWeightContainer(targetContainer)) return baseWeight;
@@ -79,7 +75,6 @@ function getEffectiveItemWeightInContainer(itemOrData, targetActor, targetContai
  * @returns {number} Эффективный вес.
  */
 function getEffectiveItemWeight(item, actor = item?.actor) {
-    // ... (без изменений) ...
       if (!item) return 0;
     const containerId = foundry.utils.getProperty(item, "system.container");
     let container = null;
@@ -97,14 +92,13 @@ function getEffectiveItemWeight(item, actor = item?.actor) {
  * @returns {number} Суммарный эффективный вес ПРЕДМЕТОВ.
  */
 function calculateCurrentContainerItemWeight(containerItem, actor) {
-     // ... (без изменений) ...
     if (!actor || !containerItem || !isActualWeightContainer(containerItem)) return 0;
     let currentItemWeight = 0;
     if (!actor.items || typeof actor.items.filter !== 'function') { console.error(`${MODULE_ID} | calculateCurrentContainerItemWeight: actor.items is not valid`); return 0; }
     const contents = actor.items.filter(i => foundry.utils.getProperty(i, "system.container") === containerItem.id);
     for (const item of contents) {
         const quantity = Number(foundry.utils.getProperty(item, "system.quantity")) || 1;
-        currentItemWeight += getEffectiveItemWeightInContainer(item, actor, containerItem) * quantity;
+        currentItemWeight += getEffectiveItemWeightInContainer(item, actor, containerItem) * quantity; // Считаем вес со скидкой этого контейнера
     }
     if (isNaN(currentItemWeight)) { console.error(`${MODULE_ID} | calculateCurrentContainerItemWeight: Item weight sum is NaN.`); currentItemWeight = 0; }
     return Number(currentItemWeight.toPrecision(5));
@@ -116,7 +110,6 @@ function calculateCurrentContainerItemWeight(containerItem, actor) {
  * @returns {string}
  */
 function getRarityClassForReduction(reductionPercent) {
-    // ... (без изменений) ...
     if (reductionPercent >= 95) return 'rarity-artifact';
     if (reductionPercent >= 75) return 'rarity-legendary';
     if (reductionPercent >= 50) return 'rarity-very-rare';
@@ -128,7 +121,6 @@ function getRarityClassForReduction(reductionPercent) {
 // --- Hooks ---
 
 Hooks.once('init', () => {
-    // ... (код init без изменений) ...
      console.log(`${MODULE_ID} | HOOK: init`);
     console.log(`${MODULE_ID} | Checking for libWrapper...`);
     if (game.modules.get('lib-wrapper')?.active) { libWrapper = globalThis.libWrapper; console.log(`${MODULE_ID} | libWrapper found and active.`); }
@@ -147,103 +139,65 @@ Hooks.once('setup', () => {
 // --- Патчинг данных актора ---
 
 /**
- * Логика модификации данных загрузки актора ПОСЛЕ оригинального расчета.
- * ПЕРЕСЧИТЫВАЕТ ВЕС С НУЛЯ, используя наши правила.
+ * Логика модификации ОБЩЕЙ ЗАГРУЗКИ актора ПОСЛЕ оригинального расчета.
  * @param {Actor} actor - Документ актора.
  */
 function modifyEncumbranceData(actor) {
-    if (!actor || !actor.items || !actor.system?.attributes?.encumbrance) {
-        return;
-    }
-
-    // console.log(`${MODULE_ID} | Recalculating encumbrance from scratch for: ${actor.name}`);
+    if (!actor || !actor.items || !actor.system?.attributes?.encumbrance) return;
 
     let totalEffectiveWeight = 0;
     let bestCurrencyReductionPercent = 0;
     let hasCurrencyReducingContainer = false;
 
-    // --- Шаг 1: Найти лучшую скидку для валюты ---
     actor.items.forEach(item => {
         if (item.type === 'container' && isActualWeightContainer(item) && !!item.getFlag(MODULE_ID, FLAG_REDUCES_CURRENCY)) {
             hasCurrencyReducingContainer = true;
             const reduction = getWeightReductionPercent(item);
-            if (reduction > bestCurrencyReductionPercent) {
-                bestCurrencyReductionPercent = reduction;
-            }
+            if (reduction > bestCurrencyReductionPercent) bestCurrencyReductionPercent = reduction;
         }
     });
 
-    // --- Шаг 2: Рассчитать эффективный вес ВСЕЙ валюты ---
-    let effectiveCurrencyWeight = 0;
+    for (const item of actor.items) {
+        if (!item.system) continue;
+        if (item.type === 'container' || foundry.utils.getProperty(item, "system.weightless")) continue;
+        const isInContainer = !!foundry.utils.getProperty(item, "system.container");
+        const isEquipped = foundry.utils.getProperty(item, "system.equipped") ?? false;
+        if (!isInContainer || isEquipped) {
+             const quantity = Number(foundry.utils.getProperty(item, "system.quantity")) || 1;
+             const weightPerUnit = getEffectiveItemWeight(item, actor);
+             if (!isNaN(weightPerUnit)) { totalEffectiveWeight += (weightPerUnit * quantity); }
+             else { console.warn(`${MODULE_ID} | Calculated NaN weight for item ${item.name}`); }
+        }
+    }
+
     const currency = actor.system.currency ?? {};
     const totalCoins = Object.values(currency).reduce((acc, v) => acc + Number(v || 0), 0);
-    const coinsPerPound = game.settings.get("dnd5e", "currencyWeight") ?? 50; // Используем системную настройку!
+    const coinsPerPound = game.settings.get("dnd5e", "currencyWeight") ?? 50;
     if (coinsPerPound > 0 && totalCoins > 0) {
         const baseCurrencyWeight = totalCoins / coinsPerPound;
         const currencyMultiplier = hasCurrencyReducingContainer ? Math.max(0, 1 - bestCurrencyReductionPercent / 100) : 1;
-        effectiveCurrencyWeight = baseCurrencyWeight * currencyMultiplier;
-        if (isNaN(effectiveCurrencyWeight)) {
-            console.error(`${MODULE_ID} | modifyEncumbranceData: Currency weight calculation resulted in NaN.`);
-            effectiveCurrencyWeight = 0;
-        }
-        totalEffectiveWeight += effectiveCurrencyWeight; // Добавляем вес валюты к общему
-        // console.log(`${MODULE_ID} | DEBUG modifyEncumbranceData: Added effective currency weight: ${effectiveCurrencyWeight.toFixed(5)} (BestReduction: ${bestCurrencyReductionPercent}%)`);
+        const effectiveCurrencyWeight = baseCurrencyWeight * currencyMultiplier;
+        if (!isNaN(effectiveCurrencyWeight)) { totalEffectiveWeight += effectiveCurrencyWeight; }
+        else { console.error(`${MODULE_ID} | modifyEncumbranceData: Currency weight calculation resulted in NaN.`); }
     }
 
-    // --- Шаг 3: Рассчитать эффективный вес ПРЕДМЕТОВ, учитываемых в загрузке ---
-    for (const item of actor.items) {
-        if (!item.system) continue;
-        if (item.type === 'container' || foundry.utils.getProperty(item, "system.weightless")) continue; // Игнорируем контейнеры и невесомые
-
-        const isInContainer = !!foundry.utils.getProperty(item, "system.container");
-        const isEquipped = foundry.utils.getProperty(item, "system.equipped") ?? false;
-
-        // Считаем вес, если предмет не в контейнере ИЛИ он экипирован (стандартное правило)
-        if (!isInContainer || isEquipped) {
-             const quantity = Number(foundry.utils.getProperty(item, "system.quantity")) || 1;
-             // getEffectiveItemWeight сама применит скидку, если предмет в нашем контейнере
-             const weightPerUnit = getEffectiveItemWeight(item, actor);
-             if (!isNaN(weightPerUnit)) {
-                 totalEffectiveWeight += (weightPerUnit * quantity);
-                //  console.log(`${MODULE_ID} | DEBUG modifyEncumbranceData: Added effective item weight for ${item.name} x${quantity}: ${(weightPerUnit * quantity).toFixed(5)}`);
-             } else {
-                  console.warn(`${MODULE_ID} | modifyEncumbranceData: Calculated NaN weight for item ${item.name}`);
-             }
-        }
-    } // Конец цикла по предметам
-
-
-    // --- Шаг 4: Установить итоговый вес ---
     const finalEffectiveWeight = Number(totalEffectiveWeight.toPrecision(5));
-    const originalValue = actor.system.attributes.encumbrance.value; // Сохраним для сравнения в логе
-    actor.system.attributes.encumbrance.value = finalEffectiveWeight; // Устанавливаем пересчитанное значение
-    // console.log(`${MODULE_ID} | Encumbrance Recalculated: Actor ${actor.name}, OriginalValue: ${originalValue?.toFixed(2)}, Final Total Effective Weight: ${finalEffectiveWeight.toFixed(2)}`);
+    actor.system.attributes.encumbrance.value = finalEffectiveWeight;
 
-    // --- Шаг 5: Пересчитать уровни загрузки (используя НОВЫЙ вес и СТАРЫЙ максимум) ---
     const enc = actor.system.attributes.encumbrance;
-    const baseMax = enc.max; // Берем максимум, рассчитанный оригинальным методом
+    const baseMax = enc.max;
     enc.encumbered = false;
     enc.heavilyEncumbered = false;
     enc.thresholds = { light: 0, medium: 0, heavy: 0, maximum: baseMax ?? 0 };
-
     if (enc.units !== "%" && typeof baseMax === 'number' && baseMax > 0) {
         let thresholdsConfig = null;
-        if (CONFIG.DND5E?.encumbrance?.threshold) {
-            thresholdsConfig = CONFIG.DND5E.encumbrance.threshold[actor.type] ?? CONFIG.DND5E.encumbrance.threshold.default;
-        }
-        if (!thresholdsConfig) {
-            thresholdsConfig = { light: 1/3, medium: 2/3, heavy: 1 };
-        }
+        if (CONFIG.DND5E?.encumbrance?.threshold) thresholdsConfig = CONFIG.DND5E.encumbrance.threshold[actor.type] ?? CONFIG.DND5E.encumbrance.threshold.default;
+        if (!thresholdsConfig) thresholdsConfig = { light: 1/3, medium: 2/3, heavy: 1 };
         if (typeof thresholdsConfig === 'object' && thresholdsConfig !== null) {
-            enc.thresholds = {
-              light: baseMax * (thresholdsConfig.light ?? 1/3),
-              medium: baseMax * (thresholdsConfig.medium ?? 2/3),
-              heavy: baseMax * (thresholdsConfig.heavy ?? 1),
-              maximum: baseMax
-            };
-            enc.encumbered = enc.value > enc.thresholds.medium; // Сравниваем НОВЫЙ вес
-            enc.heavilyEncumbered = enc.value > enc.thresholds.heavy; // Сравниваем НОВЫЙ вес
-        } else { /* console.warn(`${MODULE_ID} | Invalid thresholdsConfig for ${actor.name}.`); */ }
+            enc.thresholds = { light: baseMax * (thresholdsConfig.light ?? 1/3), medium: baseMax * (thresholdsConfig.medium ?? 2/3), heavy: baseMax * (thresholdsConfig.heavy ?? 1), maximum: baseMax };
+            enc.encumbered = enc.value > enc.thresholds.medium;
+            enc.heavilyEncumbered = enc.value > enc.thresholds.heavy;
+        }
     } else if (enc.units !== "%") { /* console.warn(`${MODULE_ID} | Invalid baseMax for ${actor.name}.`); */ }
 }
 
@@ -252,7 +206,6 @@ function modifyEncumbranceData(actor) {
  * Патчит метод prepareDerivedData актора.
  */
 function patchActorDerivedData() {
-    // ... (код patchActorDerivedData без изменений) ...
     console.log(`${MODULE_ID} | Attempting to patch Actor prepareDerivedData...`);
     try {
         const targetMethod = "CONFIG.Actor.documentClass.prototype.prepareDerivedData";
@@ -282,40 +235,111 @@ Hooks.once('ready', () => {
  * Добавляем UI элементы на лист контейнера.
  */
 Hooks.on('renderItemSheet', (app, html, data) => {
-    // ... (код добавления UI шапки и чекбокса без изменений) ...
-     if (!(app instanceof ItemSheet) || !app.object) return;
+    // --- ДОБАВИТЬ ЭТИ ЛОГИ ---
+    console.log(`%c${MODULE_ID} | --- RenderItemSheet Start for ${data?.item?.name} ---`, "color: blue; font-weight: bold;");
+    console.log(`${MODULE_ID} | App Instance:`, app);
+    console.log(`${MODULE_ID} | App Object (Item):`, app?.object);
+    console.log(`${MODULE_ID} | Data Item:`, data?.item);
+    // --- КОНЕЦ ДОБАВЛЕНИЯ ---
+
+    if (!(app instanceof ItemSheet) || !app.object) {
+        console.log(`${MODULE_ID} | Exiting: Not an ItemSheet or no item object.`);
+        return;
+    }
     const item = app.object;
+
+    // --- ДОБАВИТЬ ЭТИ ЛОГИ ---
     const isWeightContainer = isActualWeightContainer(item);
+    console.log(`${MODULE_ID} | Item: ${item.name}, Is Weight Container? -> ${isWeightContainer}`);
     const targetBlock = html.find('header.sheet-header .middle.identity-info');
-    if (targetBlock.length === 0) return;
-    targetBlock.find('.weighty-container-ui-wrapper').remove();
+    console.log(`${MODULE_ID} | Target Block for Header UI found? -> ${targetBlock.length > 0}`, targetBlock[0]);
     const detailsTab = html.find('.tab.details[data-tab="details"]');
+    console.log(`${MODULE_ID} | Details Tab found? -> ${detailsTab.length > 0}`, detailsTab[0]);
+    // --- КОНЕЦ ДОБАВЛЕНИЯ ---
+
+
+    if (targetBlock.length === 0) return; // Выходим если нет места в шапке
+
+    targetBlock.find('.weighty-container-ui-wrapper').remove();
     if (detailsTab.length > 0) detailsTab.find('.form-group.reduces-currency').remove();
-    if (!isWeightContainer) return;
+
+    if (!isWeightContainer) {
+         console.log(`${MODULE_ID} | Not a weight container, exiting before adding UI.`); // Лог если выходим здесь
+         return;
+    }
+
+    // Добавляем основной UI (процент и кнопку) в шапку
     const reductionPercent = getWeightReductionPercent(item);
     const canConfigure = game.user?.isGM || !game.settings.get(MODULE_ID, 'gmOnlyConfig');
+    // --- ДОБАВИТЬ ЭТОТ ЛОГ ---
+     console.log(`${MODULE_ID} | Can Configure Button? -> ${canConfigure}`);
+     // --- КОНЕЦ ДОБАВЛЕНИЯ ---
     const rarityClass = getRarityClassForReduction(reductionPercent);
     const uiWrapper = $('<div class="weighty-container-ui-wrapper" style="display: flex; align-items: center; gap: 5px; margin-top: 3px;"></div>');
-    const reductionDisplayHTML = `<div class="weighty-container-reduction-display ${rarityClass}" title="${game.i18n.localize('WEIGHTYCONTAINERS.WeightReductionLabel')}"><i class="fas fa-weight-hanging"></i> ${reductionPercent}%</div>`;
+
+    const reductionDisplayHTML = `
+      <div class="weighty-container-reduction-display ${rarityClass}" title="${game.i18n.localize('WEIGHTYCONTAINERS.WeightReductionLabel')}">
+        <i class="fas fa-weight-hanging"></i> ${reductionPercent}%
+      </div>`;
     uiWrapper.append(reductionDisplayHTML);
+
     if (canConfigure) {
+        // --- ДОБАВИТЬ ЭТОТ ЛОГ ---
+        console.log(`${MODULE_ID} | Adding config button...`);
+        // --- КОНЕЦ ДОБАВЛЕНИЯ ---
         const configButtonHTML = `<button type="button" class="weighty-container-config-btn" title="${game.i18n.localize('WEIGHTYCONTAINERS.ConfigButtonTooltip')}"><i class="fas fa-cogs"></i></button>`;
         const configButton = $(configButtonHTML);
-        configButton.on('click', async (ev) => { /* ... код диалога ... */ });
+        configButton.on('click', async (ev) => {
+            ev.preventDefault();
+            const currentReduction = getWeightReductionPercent(item);
+            const dialogContent = '<form><div class="form-group"><label>'+ game.i18n.localize("WEIGHTYCONTAINERS.ConfigPrompt") +'</label><input type="number" name="reductionPercent" value="'+ currentReduction +'" min="0" max="100" step="1"/></div></form>';
+            const dialogData = { title: game.i18n.localize("WEIGHTYCONTAINERS.ConfigWindowTitle"), content: dialogContent, buttons: { save: { icon: '<i class="fas fa-save"></i>', label: game.i18n.localize("WEIGHTYCONTAINERS.ConfigSave"), callback: async (jqHtml) => { try { const inputVal = jqHtml.find('input[name="reductionPercent"]').val(); const newPercentage = parseInt(inputVal || "0", 10); if (isNaN(newPercentage) || newPercentage < 0 || newPercentage > 100) { ui.notifications.warn(game.i18n.localize("WEIGHTYCONTAINERS.InvalidPercentage")); return false; } await item.setFlag(MODULE_ID, FLAG_WEIGHT_REDUCTION, newPercentage); ui.notifications.info(`Set ${item.name} weight reduction to ${newPercentage}%`); } catch (e) { console.error(`${MODULE_ID} | Error setting flag:`, e); ui.notifications.error("Error saving weight reduction setting."); } } }, cancel: { icon: '<i class="fas fa-times"></i>', label: game.i18n.localize("WEIGHTYCONTAINERS.ConfigCancel") } }, default: 'save' };
+            new Dialog(dialogData).render(true);
+        });
         uiWrapper.append(configButton);
+    } else {
+        // --- ДОБАВИТЬ ЭТОТ ЛОГ ---
+        console.log(`${MODULE_ID} | Config button NOT added (canConfigure is false).`);
+        // --- КОНЕЦ ДОБАВЛЕНИЯ ---
     }
-    if (detailsTab.length > 0) { /* ... код чекбокса валюты ... */ }
+
+
+    // Добавляем чекбокс валюты во вкладку Details
+     if (detailsTab.length > 0) {
+         // --- ДОБАВИТЬ ЭТОТ ЛОГ ---
+         console.log(`${MODULE_ID} | Attempting to add currency checkbox...`);
+         // --- КОНЕЦ ДОБАВЛЕНИЯ ---
+        const reducesCurrency = !!item.getFlag(MODULE_ID, FLAG_REDUCES_CURRENCY);
+        const currencyCheckboxId = `weighty-reduces-currency-${item.id || foundry.utils.randomID()}`;
+        const currencyCheckboxHTML = `<div class="form-group reduces-currency" style="margin-top: 5px; flex-basis: 100%; border-top: 1px solid #CCC; padding-top: 5px;"><label for="${currencyCheckboxId}" style="flex: 1; padding-left: 5px;">${game.i18n.localize('WEIGHTYCONTAINERS.ReducesCurrencyLabel')}</label><div class="form-fields" style="flex: 0 0 30px;"><input type="checkbox" id="${currencyCheckboxId}" name="flags.${MODULE_ID}.${FLAG_REDUCES_CURRENCY}" ${reducesCurrency ? 'checked' : ''} /></div></div>`;
+        const currencyCheckbox = $(currencyCheckboxHTML);
+        currencyCheckbox.find('input[type="checkbox"]').on('change', async (ev) => { const isChecked = $(ev.currentTarget).is(':checked'); await item.setFlag(MODULE_ID, FLAG_REDUCES_CURRENCY, isChecked); });
+        const targetFieldset = detailsTab.find('fieldset:has(input[name="system.capacity.weight.value"])');
+        if(targetFieldset.length > 0) {
+             targetFieldset.append(currencyCheckbox);
+              // --- ДОБАВИТЬ ЭТОТ ЛОГ ---
+              console.log(`${MODULE_ID} | Currency checkbox added to fieldset.`);
+              // --- КОНЕЦ ДОБАВЛЕНИЯ ---
+         } else {
+            detailsTab.append(currencyCheckbox);
+             // --- ДОБАВИТЬ ЭТОТ ЛОГ ---
+             console.log(`${MODULE_ID} | Currency checkbox added to details tab directly.`);
+             // --- КОНЕЦ ДОБАВЛЕНИЯ ---
+        }
+    } else {
+         // --- ДОБАВИТЬ ЭТОТ ЛОГ ---
+         console.log(`${MODULE_ID} | Cannot add currency checkbox - Details tab not found.`);
+         // --- КОНЕЦ ДОБАВЛЕНИЯ ---
+    }
+
     targetBlock.append(uiWrapper);
     try { if (app.rendered) app.setPosition({ height: "auto" }); } catch (e) { /* Игнорируем */ }
 
-    // --- ИЗМЕНЕНО: Обновление отображаемого веса на листе контейнера ---
+    // Обновление отображаемого веса на листе контейнера (только предметы)
     if (isWeightContainer && app.actor) {
         try {
-            const actor = app.actor;
-            const containerItem = item;
-            // Используем calculateCurrentContainerItemWeight для отображения веса ТОЛЬКО ПРЕДМЕТОВ
-            const displayItemWeight = calculateCurrentContainerItemWeight(containerItem, actor);
-            const containerMaxWeight = Number(foundry.utils.getProperty(containerItem, "system.capacity.weight.value") ?? 0);
+            const displayItemWeight = calculateCurrentContainerItemWeight(item, app.actor);
+            const containerMaxWeight = Number(foundry.utils.getProperty(item, "system.capacity.weight.value") ?? 0);
             const contentsTab = html.find('.tab.contents[data-tab="contents"]');
             if (contentsTab.length > 0) {
                 const valueElement = contentsTab.find('.encumbrance .meter .label .value');
@@ -329,14 +353,13 @@ Hooks.on('renderItemSheet', (app, html, data) => {
             }
         } catch(e) { console.error(`${MODULE_ID} | Error updating container sheet weight display:`, e); }
     }
-    // --- КОНЕЦ ИЗМЕНЕНИЯ ---
 });
 
 /**
- * Хук для проверки вместимости ПЕРЕД созданием предмета.
+ * Хук для проверки вместимости ПЕРЕД созданием предмета (только предметы).
  */
 Hooks.on('preCreateItem', (itemDoc, createData, options, userId) => {
-    // Использует calculateCurrentContainerItemWeight для проверки (только предметы)
+    // Использует calculateCurrentContainerItemWeight для проверки
     // ... (код preCreateItem без изменений) ...
     const parentActor = itemDoc.parent;
     const containerId = foundry.utils.getProperty(createData, 'system.container');
@@ -371,10 +394,10 @@ Hooks.on('preCreateItem', (itemDoc, createData, options, userId) => {
 });
 
 /**
- * Хук для проверки вместимости ПЕРЕД обновлением предмета.
+ * Хук для проверки вместимости ПЕРЕД обновлением предмета (только предметы).
  */
 Hooks.on('preUpdateItem', (itemDoc, change, options, userId) => {
-    // Использует calculateCurrentContainerItemWeight для проверки (только предметы)
+    // Использует calculateCurrentContainerItemWeight для проверки
     // ... (код preUpdateItem без изменений) ...
     if (!(itemDoc.parent instanceof Actor)) return true;
     const actor = itemDoc.parent;
@@ -401,27 +424,15 @@ Hooks.on('preUpdateItem', (itemDoc, change, options, userId) => {
     catch (err) { console.error(`${MODULE_ID} | ERROR preUpdateItem: Failed calc weight.`, err); return false; }
     if (isNaN(effectiveSingleItemWeight)) { console.error(`${MODULE_ID} | ERROR preUpdateItem: effectiveSingleItemWeight is NaN.`); return false; }
     const currentItemWeight = calculateCurrentContainerItemWeight(container, actor); // Текущий вес ПРЕДМЕТОВ
-     if (isNaN(currentItemWeight)) { console.error(`${MODULE_ID} | ERROR preUpdateItem: currentItemWeight is NaN.`); return false; }
+    if (isNaN(currentItemWeight)) { console.error(`${MODULE_ID} | ERROR preUpdateItem: currentItemWeight is NaN.`); return false; }
     let futureItemWeight = 0; let logReason = "";
-    if (isMovingIntoContainer) {
-        const weightOfMovedStack = effectiveSingleItemWeight * newQuantity;
-        if (isNaN(weightOfMovedStack)) { logReason = "NaN Error: weightOfMovedStack"; futureItemWeight = NaN; }
-        else { futureItemWeight = currentItemWeight + weightOfMovedStack; logReason = `Move ${newQuantity} items`; }
-    } else if (isQuantityIncreaseInContainer && checkContainerId === finalContainerId) {
-        const quantityChange = newQuantity - oldQuantity;
-        const addedWeight = effectiveSingleItemWeight * quantityChange;
-         if (isNaN(addedWeight)) { logReason = "NaN Error: addedWeight"; futureItemWeight = NaN; }
-        else { futureItemWeight = currentItemWeight + addedWeight; logReason = `Increase by ${quantityChange}`; }
-    } else { return true; }
+    if (isMovingIntoContainer) { const weightOfMovedStack = effectiveSingleItemWeight * newQuantity; if (isNaN(weightOfMovedStack)) { logReason = "NaN Error: weightOfMovedStack"; futureItemWeight = NaN; } else { futureItemWeight = currentItemWeight + weightOfMovedStack; logReason = `Move ${newQuantity} items`; } }
+    else if (isQuantityIncreaseInContainer && checkContainerId === finalContainerId) { const quantityChange = newQuantity - oldQuantity; const addedWeight = effectiveSingleItemWeight * quantityChange; if (isNaN(addedWeight)) { logReason = "NaN Error: addedWeight"; futureItemWeight = NaN; } else { futureItemWeight = currentItemWeight + addedWeight; logReason = `Increase by ${quantityChange}`; } }
+    else { return true; }
     if (isNaN(futureItemWeight)) { console.error(`${MODULE_ID} | ERROR preUpdateItem: futureItemWeight is NaN. Reason: ${logReason}`); return false; }
     const tolerance = 0.001;
     // console.log(`${MODULE_ID} | DEBUG: preUpdateItem: Current Items: ${currentItemWeight.toFixed(5)}, Future Items: ${futureItemWeight.toFixed(5)}, Max: ${containerMaxWeight}. Reason: ${logReason}`);
-    if (futureItemWeight > containerMaxWeight + tolerance) {
-        const customMessage = game.settings.get(MODULE_ID, 'capacityExceededMessage') || "Container capacity exceeded.";
-        console.warn(`${MODULE_ID} | BLOCKED preUpdateItem: Limit exceeded.`);
-        ui.notifications.warn(customMessage);
-        return false;
-    }
+    if (futureItemWeight > containerMaxWeight + tolerance) { const customMessage = game.settings.get(MODULE_ID, 'capacityExceededMessage') || "Container capacity exceeded."; console.warn(`${MODULE_ID} | BLOCKED preUpdateItem: Limit exceeded.`); ui.notifications.warn(customMessage); return false; }
     // console.log(`${MODULE_ID} | ALLOWED preUpdateItem: Within limit.`);
     return true;
 });
@@ -446,8 +457,8 @@ Hooks.on('renderActorSheet', (app, html, data) => {
         if (!container || !isActualWeightContainer(container)) { existingSpan.remove(); return; }
         const reductionPercent = getWeightReductionPercent(container);
         if (reductionPercent <= 0) { existingSpan.remove(); return; }
-        const effectiveWeight = getEffectiveItemWeight(item, actor); // Стандартный вызов
-        const baseWeight = getBaseItemWeight(item); // Используем getBaseItemWeight
+        const effectiveWeight = getEffectiveItemWeight(item, actor);
+        const baseWeight = getBaseItemWeight(item);
         if (Math.abs(effectiveWeight - baseWeight) < 0.001) { existingSpan.remove(); return; }
         if (weightCell.length > 0) {
             const displayWeight = game.settings.get("dnd5e", "metricWeightUnits") ? (effectiveWeight * (game.settings.get("dnd5e", "metricWeightMultiplier") ?? 1)).toFixed(2) : effectiveWeight.toFixed(2);
@@ -492,7 +503,7 @@ Hooks.on("updateItem", (item, change, options, userId) => {
 
 Hooks.on("deleteItem", (item, options, userId) => {
     // ... (код deleteItem без изменений) ...
-    if (item.actor && foundry.utils.getProperty(item, "system.container")) { setTimeout(() => refreshDependentSheets(item), 50); }
+     if (item.actor && foundry.utils.getProperty(item, "system.container")) { setTimeout(() => refreshDependentSheets(item), 50); }
 });
 
 // --- КОНЕЦ ФАЙЛА main.js ---
