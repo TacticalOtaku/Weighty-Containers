@@ -205,11 +205,11 @@ function modifyEncumbranceData(actor) {
     const finalEffectiveWeight = Number(effectiveTotalWeight.toPrecision(5));
     actor.system.attributes.encumbrance.value = finalEffectiveWeight;
 
-    // --- НАЧАЛО ИСПРАВЛЕННОГО БЛОКА ПЕРЕСЧЕТА УРОВНЕЙ v2 ---
+    // --- Блок пересчета уровней v2 ---
     const enc = actor.system.attributes.encumbrance;
     enc.encumbered = false;
     enc.heavilyEncumbered = false;
-    enc.thresholds = { light: 0, medium: 0, heavy: 0, maximum: enc.max ?? 0 }; // Инициализация по умолчанию
+    enc.thresholds = { light: 0, medium: 0, heavy: 0, maximum: enc.max ?? 0 };
 
     if (enc.units !== "%" && typeof enc.max === 'number' && enc.max > 0) {
         let thresholdsConfig = null;
@@ -217,9 +217,10 @@ function modifyEncumbranceData(actor) {
             thresholdsConfig = CONFIG.DND5E.encumbrance.threshold[actor.type] ?? CONFIG.DND5E.encumbrance.threshold.default;
         }
 
+        // Если конфиг НЕ НАЙДЕН, используем запасные значения без предупреждения
         if (!thresholdsConfig) {
-            console.warn(`${MODULE_ID} | Threshold config not found for actor type '${actor.type}'. Using fallback ratios (1/3, 2/3, 1) for encumbrance levels.`);
-            thresholdsConfig = { light: 1/3, medium: 2/3, heavy: 1 }; // Запасные стандартные доли
+            // console.warn(`${MODULE_ID} | Threshold config not found for actor type '${actor.type}'. Using fallback ratios (1/3, 2/3, 1) for encumbrance levels.`); // Убрано предупреждение
+            thresholdsConfig = { light: 1/3, medium: 2/3, heavy: 1 };
         }
 
         const baseMax = enc.max;
@@ -235,9 +236,10 @@ function modifyEncumbranceData(actor) {
     } else if (enc.units === "%") {
          enc.thresholds = { light: 0, medium: 0, heavy: 0, maximum: 100 };
     } else {
+         // Предупреждение оставлено только если baseMax некорректен
          console.warn(`${MODULE_ID} | Could not calculate encumbrance levels for ${actor.name}: Invalid baseMax value (baseMax=${enc.max}, typeof baseMax=${typeof enc.max}). Defaulting statuses to false.`);
     }
-    // --- КОНЕЦ ИСПРАВЛЕННОГО БЛОКА ПЕРЕСЧЕТА УРОВНЕЙ v2 ---
+    // --- КОНЕЦ блока пересчета уровней v2 ---
 }
 
 /**
@@ -275,7 +277,7 @@ function patchActorDerivedData() {
 // Патчим в ready
 Hooks.once('ready', () => {
     console.log(`${MODULE_ID} | HOOK: ready`);
-    patchActorDerivedData(); // Вызываем новый патчинг
+    patchActorDerivedData();
     console.log(`${MODULE_ID} | Module Ready`);
 });
 
@@ -314,11 +316,13 @@ Hooks.on('renderItemSheet', (app, html, data) => {
         configButton.on('click', async (ev) => {
             ev.preventDefault();
             const currentReduction = getWeightReductionPercent(item);
+
             const dialogContent = '<form><div class="form-group"><label>'
                          + game.i18n.localize("WEIGHTYCONTAINERS.ConfigPrompt")
                          + '</label><input type="number" name="reductionPercent" value="'
                          + currentReduction
                          + '" min="0" max="100" step="1"/></div></form>';
+
             const dialogData = {
                 title: game.i18n.localize("WEIGHTYCONTAINERS.ConfigWindowTitle"),
                 content: dialogContent,
@@ -330,6 +334,7 @@ Hooks.on('renderItemSheet', (app, html, data) => {
                             try {
                                 const inputVal = jqHtml.find('input[name="reductionPercent"]').val();
                                 const newPercentage = parseInt(inputVal || "0", 10);
+
                                 if (isNaN(newPercentage) || newPercentage < 0 || newPercentage > 100) {
                                     ui.notifications.warn(game.i18n.localize("WEIGHTYCONTAINERS.InvalidPercentage"));
                                     return false;
@@ -361,10 +366,12 @@ Hooks.on('renderItemSheet', (app, html, data) => {
             const containerItem = item;
             const effectiveCurrentWeight = calculateCurrentContainerWeight(containerItem, actor);
             const containerMaxWeight = Number(foundry.utils.getProperty(containerItem, "system.capacity.weight.value") ?? 0);
+
             const contentsTab = html.find('.tab.contents[data-tab="contents"]');
             if (contentsTab.length > 0) {
                 const valueElement = contentsTab.find('.encumbrance .meter .label .value');
                 const meterElement = contentsTab.find('.encumbrance .meter.progress');
+
                 if (valueElement.length > 0) {
                     valueElement.text(Math.round(effectiveCurrentWeight * 100) / 100);
                 }
