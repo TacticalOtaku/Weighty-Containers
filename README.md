@@ -32,7 +32,7 @@ Foundry VTT Module for Dungeons & Dragons 5th Edition
 1.  Через Манифест (Рекомендуется)
        В меню настройки Foundry VTT перейдите на вкладку Add-on Modules.
        Нажмите Install Module.
-       В поле Manifest URL вставьте следующую ссылку (замените на реальную ссылку, если вы загрузите модуль) `СЮДА_ВСТАВИТЬ_ССЫЛКУ_НА_MANIFEST.JSON`
+       В поле Manifest URL вставьте следующую ссылку (замените на реальную ссылку, если вы загрузите модуль) `https://raw.githubusercontent.com/TacticalOtaku/Weighty-Containers/main/module.json`
        Нажмите Install.
 2.  Вручную
        Скачайте zip-архив модуля.
