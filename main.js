@@ -5,10 +5,7 @@ const FLAG_WEIGHT_REDUCTION = 'weightReduction';
 let libWrapper; // Переменная для libWrapper
 
 // --- Helper Functions ---
-// isActualWeightContainer, getWeightReductionPercent, getEffectiveItemWeight,
-// calculateCurrentContainerWeight, getRarityClassForReduction
-// --- ОСТАЮТСЯ БЕЗ ИЗМЕНЕНИЙ из предыдущей версии ---
-// ... (скопируйте их сюда) ...
+
 /**
  * Проверяет, является ли предмет контейнером с ограничением по весу.
  * @param {Item | null | undefined} item - Документ предмета.
@@ -118,7 +115,6 @@ function getRarityClassForReduction(reductionPercent) {
     return 'rarity-common';
 }
 
-
 // --- Hooks ---
 
 Hooks.once('init', () => {
@@ -163,38 +159,20 @@ Hooks.once('setup', () => {
     console.log(`${MODULE_ID} | HOOK: setup`);
 });
 
-// --- НОВЫЙ ПАТЧИНГ ---
+// --- Патчинг данных актора ---
 
 /**
  * Логика модификации данных загрузки актора.
  * @param {Actor} actor - Документ актора.
  */
 function modifyEncumbranceData(actor) {
-    // Эта функция вызывается ПОСЛЕ того, как оригинальный prepareDerivedData выполнился.
-    // Значит, actor.system.attributes.encumbrance уже существует (если он был создан системой).
     if (!actor || !actor.items || !actor.system?.attributes?.encumbrance) {
-        // console.warn(`${MODULE_ID} | modifyEncumbranceData: Missing actor, items, or encumbrance data for`, actor?.name);
         return;
     }
-
-    // console.log(`${MODULE_ID} | Modifying encumbrance for actor: ${actor.name}`);
 
     let effectiveTotalWeight = 0;
     for (const item of actor.items) {
         if (!item.system) continue;
-        // Стандартная логика dnd5e: Не экипированные предметы В контейнере не учитываются в весе
-        // (но экипированные В контейнере - учитываются, что странно, но так в ядре)
-        // Мы будем считать вес всех предметов, кроме явно невесомых, и применять скидку если они в нашем контейнере.
-        // Если предмет не экипирован и находится в обычном (не нашем) контейнере, его вес не считается ядром.
-        // Нам нужно воспроизвести это, но применить скидку к предметам в наших контейнерах.
-
-        const isInAnyContainer = !!foundry.utils.getProperty(item, "system.container");
-        const isEquipped = foundry.utils.getProperty(item, "system.equipped") ?? false; // Считаем неэкипированным, если свойство отсутствует
-
-         // Основное правило D&D5e: вес считается только для предметов, которые не находятся в контейнерах ИЛИ находятся в контейнерах, но экипированы.
-         // Модификация: Если предмет находится в нашем Weighty Container, мы ВСЕГДА считаем его вес (с учетом скидки), независимо от экипировки,
-         // так как мы управляем его вкладом в лимит контейнера.
-         // Предметы в ОБЫЧНЫХ контейнерах считаются по стандартным правилам (только если экипированы).
 
         let countItemWeight = false;
         const containerId = foundry.utils.getProperty(item, "system.container");
@@ -204,17 +182,14 @@ function modifyEncumbranceData(actor) {
              const container = actor.items.get(containerId);
              if (container && isActualWeightContainer(container)) {
                  isWeightyContainerItem = true;
-                 countItemWeight = true; // Вес предметов в наших контейнерах всегда считаем для загрузки (но со скидкой)
-             } else if (isEquipped) {
-                  // Предмет в обычном контейнере, но экипирован - считаем базовый вес
+                 countItemWeight = true;
+             } else if (foundry.utils.getProperty(item, "system.equipped") ?? false) {
                   countItemWeight = true;
              }
         } else {
-            // Предмет не в контейнере - считаем базовый вес
             countItemWeight = true;
         }
 
-        // Пропускаем невесомые предметы
         if (foundry.utils.getProperty(item, "system.weightless")) {
              countItemWeight = false;
         }
@@ -224,49 +199,60 @@ function modifyEncumbranceData(actor) {
              let weightPerUnit = 0;
 
              if (isWeightyContainerItem) {
-                 weightPerUnit = getEffectiveItemWeight(item, actor); // Применяем скидку
+                 weightPerUnit = getEffectiveItemWeight(item, actor);
              } else {
-                 // Для предметов не в наших контейнерах - базовый вес
                  const weightSource = foundry.utils.getProperty(item, "system.weight");
                  if (typeof weightSource === 'number') weightPerUnit = weightSource;
                  else if (typeof weightSource === 'object' && weightSource !== null && typeof weightSource.value === 'number') weightPerUnit = weightSource.value;
                  weightPerUnit = Number(weightPerUnit) || 0;
              }
 
-             if (isNaN(weightPerUnit)) weightPerUnit = 0; // Защита от NaN
+             if (isNaN(weightPerUnit)) weightPerUnit = 0;
              effectiveTotalWeight += (weightPerUnit * quantity);
         }
     }
 
     const finalEffectiveWeight = Number(effectiveTotalWeight.toPrecision(5));
-    // console.log(`${MODULE_ID} | Encumbrance Patch: Actor ${actor.name}, Original Value (may be already modified): ${actor.system.attributes.encumbrance.value}, Calculated Effective Weight: ${finalEffectiveWeight}`);
     actor.system.attributes.encumbrance.value = finalEffectiveWeight;
 
-    // Пересчет уровней загрузки (важно сделать ПОСЛЕ установки нового значения)
+    // --- НАЧАЛО ИЗМЕНЕННОГО БЛОКА ПЕРЕСЧЕТА УРОВНЕЙ ---
     const enc = actor.system.attributes.encumbrance;
-    if (enc.units !== "%" && CONFIG.DND5E?.encumbrance?.threshold) { // Добавил проверку CONFIG.DND5E.encumbrance.threshold
-        const thresholds = CONFIG.DND5E.encumbrance.threshold[actor.type] ?? CONFIG.DND5E.encumbrance.threshold.default;
+
+    // Сначала обнуляем статусы, если расчет не удастся
+    enc.encumbered = false;
+    enc.heavilyEncumbered = false;
+
+    // Проверяем, нужно ли вообще считать пороги (не процентная система и есть конфиг порогов)
+    if (enc.units !== "%" && CONFIG.DND5E?.encumbrance?.threshold) {
+        const thresholdsConfig = CONFIG.DND5E.encumbrance.threshold[actor.type] ?? CONFIG.DND5E.encumbrance.threshold.default;
         const baseMax = enc.max; // Используем max, рассчитанный оригинальным методом
-        if (thresholds && typeof baseMax === 'number') { // Проверяем что thresholds и baseMax существуют
+
+         // ЛОГИРОВАНИЕ для отладки
+        // console.log(`${MODULE_ID} | Calculating thresholds for ${actor.name} (Type: ${actor.type}). Max Weight (baseMax): ${baseMax} (Type: ${typeof baseMax}), Thresholds Config:`, thresholdsConfig);
+
+        // ГЛАВНАЯ ПРОВЕРКА: есть конфиг порогов И baseMax является валидным положительным числом?
+        if (thresholdsConfig && typeof baseMax === 'number' && baseMax > 0) {
+            // Рассчитываем пороги
             enc.thresholds = {
-              light: baseMax * (thresholds.light ?? 1/3),
-              medium: baseMax * (thresholds.medium ?? 2/3),
-              heavy: baseMax * (thresholds.heavy ?? 1),
+              light: baseMax * (thresholdsConfig.light ?? 1/3),
+              medium: baseMax * (thresholdsConfig.medium ?? 2/3),
+              heavy: baseMax * (thresholdsConfig.heavy ?? 1),
               maximum: baseMax
             };
-            // Считаем пороговые значения корректно
+            // Устанавливаем статусы на основе НОВОГО значения enc.value и порогов
             enc.encumbered = enc.value > enc.thresholds.medium;
             enc.heavilyEncumbered = enc.value > enc.thresholds.heavy;
         } else {
-             console.warn(`${MODULE_ID} | Could not calculate encumbrance levels for ${actor.name}: Missing thresholds or max value.`);
-             enc.encumbered = false;
-             enc.heavilyEncumbered = false;
+             // Если не можем рассчитать пороги, логируем предупреждение
+             console.warn(`${MODULE_ID} | Could not calculate encumbrance levels for ${actor.name}: Missing or invalid thresholds config or baseMax value (baseMax=${baseMax}, typeof baseMax=${typeof baseMax}). Defaulting statuses to false.`);
+             // Устанавливаем пустые пороги для консистентности данных
+             enc.thresholds = { light: 0, medium: 0, heavy: 0, maximum: baseMax ?? 0 };
         }
     } else {
-         // Для вариантной загрузки или если thresholds не найдены
-         enc.encumbered = false;
-         enc.heavilyEncumbered = false;
+        // Для процентной загрузки или если нет конфига порогов, просто сбрасываем статусы и ставим пустые пороги
+        enc.thresholds = { light: 0, medium: 0, heavy: 0, maximum: enc.max ?? 0 };
     }
+    // --- КОНЕЦ ИЗМЕНЕННОГО БЛОКА ---
 }
 
 /**
@@ -275,14 +261,11 @@ function modifyEncumbranceData(actor) {
 function patchActorDerivedData() {
     console.log(`${MODULE_ID} | Attempting to patch Actor prepareDerivedData...`);
     try {
-        // Путь к методу prepareDerivedData в базовом классе Actor Foundry
-        // Он должен существовать всегда. Мы обернем его и вызовем нашу модификацию после оригинала.
         const targetMethod = "CONFIG.Actor.documentClass.prototype.prepareDerivedData";
 
         if (libWrapper) {
             libWrapper.register(MODULE_ID, targetMethod, function(wrapped, ...args) {
-                wrapped(...args); // Вызываем оригинальный prepareDerivedData
-                // Теперь вызываем нашу функцию для коррекции загрузки
+                wrapped(...args); // Вызываем оригинал
                 modifyEncumbranceData(this); // 'this' это документ Actor
             }, "WRAPPER");
             console.log(`${MODULE_ID} | Successfully wrapped ${targetMethod} with libWrapper.`);
@@ -308,19 +291,18 @@ function patchActorDerivedData() {
 // Патчим в ready
 Hooks.once('ready', () => {
     console.log(`${MODULE_ID} | HOOK: ready`);
-    // Убрали setTimeout, попробуем патчить сразу в ready
-    patchActorDerivedData();
+    patchActorDerivedData(); // Вызываем новый патчинг
     console.log(`${MODULE_ID} | Module Ready`);
 });
 
-// --- КОНЕЦ НОВОГО ПАТЧИНГА ---
+// --- КОНЕЦ ПАТЧИНГА ---
 
 
 /**
  * Добавляем UI элементы на лист контейнера.
  */
 Hooks.on('renderItemSheet', (app, html, data) => {
-    // ... (код renderItemSheet без изменений из предыдущей версии) ...
+    // ... (код renderItemSheet без изменений) ...
     if (!(app instanceof ItemSheet) || !app.object) return;
     const item = app.object;
 
@@ -363,7 +345,7 @@ Hooks.on('renderItemSheet', (app, html, data) => {
                     save: {
                         icon: '<i class="fas fa-save"></i>',
                         label: game.i18n.localize("WEIGHTYCONTAINERS.ConfigSave"),
-                        callback: async (jqHtml) => { // Ожидаем jQuery объект
+                        callback: async (jqHtml) => {
                             try {
                                 const inputVal = jqHtml.find('input[name="reductionPercent"]').val();
                                 const newPercentage = parseInt(inputVal || "0", 10);
@@ -424,7 +406,7 @@ Hooks.on('renderItemSheet', (app, html, data) => {
  * Хук для проверки вместимости ПЕРЕД созданием предмета.
  */
 Hooks.on('preCreateItem', (itemDoc, createData, options, userId) => {
-    // ... (код preCreateItem без изменений из предыдущей версии) ...
+    // ... (код preCreateItem без изменений) ...
     const parentActor = itemDoc.parent;
     const containerId = foundry.utils.getProperty(createData, 'system.container');
     if (!(parentActor instanceof Actor) || !containerId) return true;
@@ -478,7 +460,7 @@ Hooks.on('preCreateItem', (itemDoc, createData, options, userId) => {
  * Хук для проверки вместимости ПЕРЕД обновлением предмета.
  */
 Hooks.on('preUpdateItem', (itemDoc, change, options, userId) => {
-    // ... (код preUpdateItem без изменений из предыдущей версии) ...
+    // ... (код preUpdateItem без изменений) ...
      if (!(itemDoc.parent instanceof Actor)) return true;
 
     const actor = itemDoc.parent;
@@ -579,7 +561,7 @@ Hooks.on('preUpdateItem', (itemDoc, change, options, userId) => {
  * Добавляем отображение эффективного веса на листе актора
  */
 Hooks.on('renderActorSheet', (app, html, data) => {
-    // ... (код renderActorSheet без изменений из предыдущей версии) ...
+    // ... (код renderActorSheet без изменений) ...
      if (!(app instanceof ActorSheet) || !app.actor || ['npc', 'vehicle'].includes(app.actor.type)) return;
     const actor = app.actor;
 
@@ -629,8 +611,8 @@ Hooks.on('renderActorSheet', (app, html, data) => {
  * Обновление отображения веса на листе актора и листах контейнеров при изменении
  */
 function refreshDependentSheets(item) {
-    // ... (код refreshDependentSheets без изменений из предыдущей версии) ...
-     const actor = item.actor;
+    // ... (код refreshDependentSheets без изменений) ...
+    const actor = item.actor;
     if (!actor) return;
 
     if (actor.sheet instanceof ActorSheet && actor.sheet.rendered) {
@@ -665,7 +647,7 @@ function refreshDependentSheets(item) {
 }
 
 Hooks.on("updateItem", (item, change, options, userId) => {
-    // ... (код updateItem без изменений из предыдущей версии) ...
+    // ... (код updateItem без изменений) ...
      const flagPath = `flags.${MODULE_ID}.${FLAG_WEIGHT_REDUCTION}`;
     const relevantChange = foundry.utils.hasProperty(change, flagPath)
                        || foundry.utils.hasProperty(change, 'system.container')
@@ -677,7 +659,7 @@ Hooks.on("updateItem", (item, change, options, userId) => {
 });
 
 Hooks.on("deleteItem", (item, options, userId) => {
-    // ... (код deleteItem без изменений из предыдущей версии) ...
+    // ... (код deleteItem без изменений) ...
      if (item.actor && foundry.utils.getProperty(item, "system.container")) {
         setTimeout(() => refreshDependentSheets(item), 50);
     }
