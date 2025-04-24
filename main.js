@@ -173,31 +173,22 @@ function modifyEncumbranceData(actor) {
     let effectiveTotalWeight = 0;
     for (const item of actor.items) {
         if (!item.system) continue;
-
         let countItemWeight = false;
         const containerId = foundry.utils.getProperty(item, "system.container");
         let isWeightyContainerItem = false;
-
         if (containerId) {
              const container = actor.items.get(containerId);
              if (container && isActualWeightContainer(container)) {
-                 isWeightyContainerItem = true;
-                 countItemWeight = true;
+                 isWeightyContainerItem = true; countItemWeight = true;
              } else if (foundry.utils.getProperty(item, "system.equipped") ?? false) {
                   countItemWeight = true;
              }
-        } else {
-            countItemWeight = true;
-        }
-
-        if (foundry.utils.getProperty(item, "system.weightless")) {
-             countItemWeight = false;
-        }
+        } else { countItemWeight = true; }
+        if (foundry.utils.getProperty(item, "system.weightless")) { countItemWeight = false; }
 
         if (countItemWeight) {
              const quantity = Number(foundry.utils.getProperty(item, "system.quantity")) || 1;
              let weightPerUnit = 0;
-
              if (isWeightyContainerItem) {
                  weightPerUnit = getEffectiveItemWeight(item, actor);
              } else {
@@ -206,7 +197,6 @@ function modifyEncumbranceData(actor) {
                  else if (typeof weightSource === 'object' && weightSource !== null && typeof weightSource.value === 'number') weightPerUnit = weightSource.value;
                  weightPerUnit = Number(weightPerUnit) || 0;
              }
-
              if (isNaN(weightPerUnit)) weightPerUnit = 0;
              effectiveTotalWeight += (weightPerUnit * quantity);
         }
@@ -215,44 +205,39 @@ function modifyEncumbranceData(actor) {
     const finalEffectiveWeight = Number(effectiveTotalWeight.toPrecision(5));
     actor.system.attributes.encumbrance.value = finalEffectiveWeight;
 
-    // --- НАЧАЛО ИЗМЕНЕННОГО БЛОКА ПЕРЕСЧЕТА УРОВНЕЙ ---
+    // --- НАЧАЛО ИСПРАВЛЕННОГО БЛОКА ПЕРЕСЧЕТА УРОВНЕЙ v2 ---
     const enc = actor.system.attributes.encumbrance;
-
-    // Сначала обнуляем статусы, если расчет не удастся
     enc.encumbered = false;
     enc.heavilyEncumbered = false;
+    enc.thresholds = { light: 0, medium: 0, heavy: 0, maximum: enc.max ?? 0 }; // Инициализация по умолчанию
 
-    // Проверяем, нужно ли вообще считать пороги (не процентная система и есть конфиг порогов)
-    if (enc.units !== "%" && CONFIG.DND5E?.encumbrance?.threshold) {
-        const thresholdsConfig = CONFIG.DND5E.encumbrance.threshold[actor.type] ?? CONFIG.DND5E.encumbrance.threshold.default;
-        const baseMax = enc.max; // Используем max, рассчитанный оригинальным методом
-
-         // ЛОГИРОВАНИЕ для отладки
-        // console.log(`${MODULE_ID} | Calculating thresholds for ${actor.name} (Type: ${actor.type}). Max Weight (baseMax): ${baseMax} (Type: ${typeof baseMax}), Thresholds Config:`, thresholdsConfig);
-
-        // ГЛАВНАЯ ПРОВЕРКА: есть конфиг порогов И baseMax является валидным положительным числом?
-        if (thresholdsConfig && typeof baseMax === 'number' && baseMax > 0) {
-            // Рассчитываем пороги
-            enc.thresholds = {
-              light: baseMax * (thresholdsConfig.light ?? 1/3),
-              medium: baseMax * (thresholdsConfig.medium ?? 2/3),
-              heavy: baseMax * (thresholdsConfig.heavy ?? 1),
-              maximum: baseMax
-            };
-            // Устанавливаем статусы на основе НОВОГО значения enc.value и порогов
-            enc.encumbered = enc.value > enc.thresholds.medium;
-            enc.heavilyEncumbered = enc.value > enc.thresholds.heavy;
-        } else {
-             // Если не можем рассчитать пороги, логируем предупреждение
-             console.warn(`${MODULE_ID} | Could not calculate encumbrance levels for ${actor.name}: Missing or invalid thresholds config or baseMax value (baseMax=${baseMax}, typeof baseMax=${typeof baseMax}). Defaulting statuses to false.`);
-             // Устанавливаем пустые пороги для консистентности данных
-             enc.thresholds = { light: 0, medium: 0, heavy: 0, maximum: baseMax ?? 0 };
+    if (enc.units !== "%" && typeof enc.max === 'number' && enc.max > 0) {
+        let thresholdsConfig = null;
+        if (CONFIG.DND5E?.encumbrance?.threshold) {
+            thresholdsConfig = CONFIG.DND5E.encumbrance.threshold[actor.type] ?? CONFIG.DND5E.encumbrance.threshold.default;
         }
+
+        if (!thresholdsConfig) {
+            console.warn(`${MODULE_ID} | Threshold config not found for actor type '${actor.type}'. Using fallback ratios (1/3, 2/3, 1) for encumbrance levels.`);
+            thresholdsConfig = { light: 1/3, medium: 2/3, heavy: 1 }; // Запасные стандартные доли
+        }
+
+        const baseMax = enc.max;
+        enc.thresholds = {
+          light: baseMax * (thresholdsConfig.light ?? 1/3),
+          medium: baseMax * (thresholdsConfig.medium ?? 2/3),
+          heavy: baseMax * (thresholdsConfig.heavy ?? 1),
+          maximum: baseMax
+        };
+        enc.encumbered = enc.value > enc.thresholds.medium;
+        enc.heavilyEncumbered = enc.value > enc.thresholds.heavy;
+
+    } else if (enc.units === "%") {
+         enc.thresholds = { light: 0, medium: 0, heavy: 0, maximum: 100 };
     } else {
-        // Для процентной загрузки или если нет конфига порогов, просто сбрасываем статусы и ставим пустые пороги
-        enc.thresholds = { light: 0, medium: 0, heavy: 0, maximum: enc.max ?? 0 };
+         console.warn(`${MODULE_ID} | Could not calculate encumbrance levels for ${actor.name}: Invalid baseMax value (baseMax=${enc.max}, typeof baseMax=${typeof enc.max}). Defaulting statuses to false.`);
     }
-    // --- КОНЕЦ ИЗМЕНЕННОГО БЛОКА ---
+    // --- КОНЕЦ ИСПРАВЛЕННОГО БЛОКА ПЕРЕСЧЕТА УРОВНЕЙ v2 ---
 }
 
 /**
@@ -265,12 +250,11 @@ function patchActorDerivedData() {
 
         if (libWrapper) {
             libWrapper.register(MODULE_ID, targetMethod, function(wrapped, ...args) {
-                wrapped(...args); // Вызываем оригинал
-                modifyEncumbranceData(this); // 'this' это документ Actor
+                wrapped(...args);
+                modifyEncumbranceData(this);
             }, "WRAPPER");
             console.log(`${MODULE_ID} | Successfully wrapped ${targetMethod} with libWrapper.`);
         } else {
-            // --- Ручной патчинг ---
             console.warn(`${MODULE_ID} | Attempting manual patch for ${targetMethod}...`);
             const originalMethod = CONFIG.Actor.documentClass.prototype.prepareDerivedData;
             if (typeof originalMethod !== 'function') {
@@ -278,8 +262,8 @@ function patchActorDerivedData() {
                  return;
             }
             CONFIG.Actor.documentClass.prototype.prepareDerivedData = function(...args) {
-                 originalMethod.apply(this, args); // Вызываем оригинал
-                 modifyEncumbranceData(this);       // Применяем модификацию
+                 originalMethod.apply(this, args);
+                 modifyEncumbranceData(this);
             };
              console.log(`${MODULE_ID} | Manually patched ${targetMethod}.`);
         }
@@ -302,7 +286,6 @@ Hooks.once('ready', () => {
  * Добавляем UI элементы на лист контейнера.
  */
 Hooks.on('renderItemSheet', (app, html, data) => {
-    // ... (код renderItemSheet без изменений) ...
     if (!(app instanceof ItemSheet) || !app.object) return;
     const item = app.object;
 
@@ -331,13 +314,11 @@ Hooks.on('renderItemSheet', (app, html, data) => {
         configButton.on('click', async (ev) => {
             ev.preventDefault();
             const currentReduction = getWeightReductionPercent(item);
-
             const dialogContent = '<form><div class="form-group"><label>'
                          + game.i18n.localize("WEIGHTYCONTAINERS.ConfigPrompt")
                          + '</label><input type="number" name="reductionPercent" value="'
                          + currentReduction
                          + '" min="0" max="100" step="1"/></div></form>';
-
             const dialogData = {
                 title: game.i18n.localize("WEIGHTYCONTAINERS.ConfigWindowTitle"),
                 content: dialogContent,
@@ -349,7 +330,6 @@ Hooks.on('renderItemSheet', (app, html, data) => {
                             try {
                                 const inputVal = jqHtml.find('input[name="reductionPercent"]').val();
                                 const newPercentage = parseInt(inputVal || "0", 10);
-
                                 if (isNaN(newPercentage) || newPercentage < 0 || newPercentage > 100) {
                                     ui.notifications.warn(game.i18n.localize("WEIGHTYCONTAINERS.InvalidPercentage"));
                                     return false;
@@ -381,12 +361,10 @@ Hooks.on('renderItemSheet', (app, html, data) => {
             const containerItem = item;
             const effectiveCurrentWeight = calculateCurrentContainerWeight(containerItem, actor);
             const containerMaxWeight = Number(foundry.utils.getProperty(containerItem, "system.capacity.weight.value") ?? 0);
-
             const contentsTab = html.find('.tab.contents[data-tab="contents"]');
             if (contentsTab.length > 0) {
                 const valueElement = contentsTab.find('.encumbrance .meter .label .value');
                 const meterElement = contentsTab.find('.encumbrance .meter.progress');
-
                 if (valueElement.length > 0) {
                     valueElement.text(Math.round(effectiveCurrentWeight * 100) / 100);
                 }
@@ -406,7 +384,6 @@ Hooks.on('renderItemSheet', (app, html, data) => {
  * Хук для проверки вместимости ПЕРЕД созданием предмета.
  */
 Hooks.on('preCreateItem', (itemDoc, createData, options, userId) => {
-    // ... (код preCreateItem без изменений) ...
     const parentActor = itemDoc.parent;
     const containerId = foundry.utils.getProperty(createData, 'system.container');
     if (!(parentActor instanceof Actor) || !containerId) return true;
@@ -460,8 +437,7 @@ Hooks.on('preCreateItem', (itemDoc, createData, options, userId) => {
  * Хук для проверки вместимости ПЕРЕД обновлением предмета.
  */
 Hooks.on('preUpdateItem', (itemDoc, change, options, userId) => {
-    // ... (код preUpdateItem без изменений) ...
-     if (!(itemDoc.parent instanceof Actor)) return true;
+    if (!(itemDoc.parent instanceof Actor)) return true;
 
     const actor = itemDoc.parent;
     const targetContainerId = foundry.utils.getProperty(change, 'system.container');
@@ -561,8 +537,7 @@ Hooks.on('preUpdateItem', (itemDoc, change, options, userId) => {
  * Добавляем отображение эффективного веса на листе актора
  */
 Hooks.on('renderActorSheet', (app, html, data) => {
-    // ... (код renderActorSheet без изменений) ...
-     if (!(app instanceof ActorSheet) || !app.actor || ['npc', 'vehicle'].includes(app.actor.type)) return;
+    if (!(app instanceof ActorSheet) || !app.actor || ['npc', 'vehicle'].includes(app.actor.type)) return;
     const actor = app.actor;
 
     html.find('.inventory-list .item[data-item-id]').each((index, element) => {
@@ -611,12 +586,11 @@ Hooks.on('renderActorSheet', (app, html, data) => {
  * Обновление отображения веса на листе актора и листах контейнеров при изменении
  */
 function refreshDependentSheets(item) {
-    // ... (код refreshDependentSheets без изменений) ...
     const actor = item.actor;
     if (!actor) return;
 
     if (actor.sheet instanceof ActorSheet && actor.sheet.rendered) {
-        try { actor.sheet.render(false); } catch(e) { /* ignore if sheet closed */ }
+        try { actor.sheet.render(false); } catch(e) { /* ignore */ }
     }
 
     const currentContainerId = foundry.utils.getProperty(item, "system.container");
@@ -647,8 +621,7 @@ function refreshDependentSheets(item) {
 }
 
 Hooks.on("updateItem", (item, change, options, userId) => {
-    // ... (код updateItem без изменений) ...
-     const flagPath = `flags.${MODULE_ID}.${FLAG_WEIGHT_REDUCTION}`;
+    const flagPath = `flags.${MODULE_ID}.${FLAG_WEIGHT_REDUCTION}`;
     const relevantChange = foundry.utils.hasProperty(change, flagPath)
                        || foundry.utils.hasProperty(change, 'system.container')
                        || foundry.utils.hasProperty(change, 'system.quantity')
@@ -659,8 +632,7 @@ Hooks.on("updateItem", (item, change, options, userId) => {
 });
 
 Hooks.on("deleteItem", (item, options, userId) => {
-    // ... (код deleteItem без изменений) ...
-     if (item.actor && foundry.utils.getProperty(item, "system.container")) {
+    if (item.actor && foundry.utils.getProperty(item, "system.container")) {
         setTimeout(() => refreshDependentSheets(item), 50);
     }
 });
