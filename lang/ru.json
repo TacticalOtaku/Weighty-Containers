@@ -1,0 +1,16 @@
+{
+  "WEIGHTYCONTAINERS.SettingGMOnlyConfig": "Ограничить кнопку настройки для ГМ",
+  "WEIGHTYCONTAINERS.SettingGMOnlyConfigHint": "Если отмечено, только Мастер Игры сможет видеть и использовать кнопку настройки снижения веса на листах контейнеров.",
+  "WEIGHTYCONTAINERS.ConfigButtonTooltip": "Настроить Снижение Веса",
+  "WEIGHTYCONTAINERS.ConfigWindowTitle": "Настроить Снижение Веса Контейнера",
+  "WEIGHTYCONTAINERS.ConfigPrompt": "Введите процент снижения веса (0-100):",
+  "WEIGHTYCONTAINERS.ConfigSave": "Сохранить",
+  "WEIGHTYCONTAINERS.ConfigCancel": "Отмена",
+  "WEIGHTYCONTAINERS.InvalidPercentage": "Пожалуйста, введите корректный процент от 0 до 100.",
+  "WEIGHTYCONTAINERS.WeightReductionLabel": "Снижение веса:",
+  "WEIGHTYCONTAINERS.CapacityExceeded": "Невозможно добавить/увеличить предмет. Вместимость контейнера '{containerName}' превышена.",
+  "WEIGHTYCONTAINERS.CapacityWouldExceed": "Невозможно добавить/увеличить предмет. Вместимость контейнера '{containerName}' будет превышена.",
+  "WEIGHTYCONTAINERS.ItemWeightLabel": "Эффективный вес",
+  "WEIGHTYCONTAINERS.SettingCapacityMessageName": "Сообщение о превышении вместимости",
+  "WEIGHTYCONTAINERS.SettingCapacityMessageHint": "Текст уведомления, отображаемый при попытке превысить вместимость контейнера. Оставьте пустым для стандартного сообщения."
+}
