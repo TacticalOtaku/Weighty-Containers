@@ -1,0 +1,54 @@
+{
+  "id": "weighty-containers",
+  "title": "Weighty Containers",
+  "description": "Manages container weight capacity, allows weight reduction for items inside, and adjusts actor encumbrance display.",
+  "version": "1.1.0",
+  "compatibility": {
+    "minimum": "12.324",
+    "verified": "12.331"
+  },
+  "authors": [
+    {
+      "name": "TacticalOtaku"
+    }
+  ],
+  "relationships": {
+    "systems": [
+      {
+        "id": "dnd5e",
+        "type": "system",
+        "compatibility": {
+          "minimum": "3.2.0",
+          "verified": "4.3.9"
+        }
+      }
+    ],
+    "requires": [],
+    "conflicts": []
+  },
+  "esmodules": [
+    "main.js"
+  ],
+  "styles": [
+    "styles/weighty-containers.css"
+  ],
+  "languages": [
+    {
+      "lang": "en",
+      "name": "English",
+      "path": "lang/en.json"
+    },
+    {
+      "lang": "ru",
+      "name": "Русский",
+      "path": "lang/ru.json"
+    }
+  ],
+  "flags": {
+    "scope": "world",
+    "requiresReload": true
+  },
+  "url": "https://github.com/TacticalOtaku/Weighty-Containers",
+  "manifest": "https://raw.githubusercontent.com/TacticalOtaku/Weighty-Containers/main/module.json",
+  "download": "https://github.com/TacticalOtaku/Weighty-Containers/releases/download/v1.1.0/procent-activities-v1.1.0.zip"
+}
