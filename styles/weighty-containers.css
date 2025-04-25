@@ -1,112 +1,68 @@
-/* Weighty Containers module styles */
-
-/* Container UI wrapper for weight reduction display and config button */
+/* Стили для отображения процента снижения веса и кнопки */
 .weighty-container-ui-wrapper {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    margin-top: 3px;
-    font-size: 0.9em;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 3px; /* Немного отступа сверху */
+  justify-content: flex-start; /* Выравнивание по левому краю внутри блока */
+  width: fit-content; /* Ширина по содержимому */
 }
 
-/* Weight reduction display */
 .weighty-container-reduction-display {
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 6px;
-    border-radius: 4px;
-    color: #fff;
-    background-color: #666;
-    font-weight: bold;
+  background: rgba(0, 0, 0, 0.1);
+  border: 1px solid #666;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 0.9em;
+  font-weight: bold;
+  text-align: center;
+  white-space: nowrap;
 }
 
-.weighty-container-reduction-display i {
-    margin-right: 4px;
+/* Размещаем блок UI внутри .middle.identity-info */
+header.sheet-header .middle.identity-info {
+    display: flex;
+    flex-direction: column; /* Элементы друг под другом */
+    align-items: flex-start; /* Выравнивание по левому краю */
 }
 
-/* Rarity classes for weight reduction */
-.rarity-common {
-    background-color: #666;
-}
-.rarity-uncommon {
-    background-color: #2e7d32;
-}
-.rarity-rare {
-    background-color: #1565c0;
-}
-.rarity-very-rare {
-    background-color: #6a1b9a;
-}
-.rarity-legendary {
-    background-color: #d84315;
-}
-.rarity-artifact {
-    background-color: #b71c1c;
-}
-
-/* Configuration button */
+/* Стили для кнопки конфигурации */
 .weighty-container-config-btn {
-    background: none;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    padding: 2px 6px;
-    cursor: pointer;
-    color: #333;
+  flex: 0 0 20px;
+  height: 20px;
+  line-height: 18px;
+  font-size: 14px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #7a7971;
 }
 
 .weighty-container-config-btn:hover {
-    background-color: #f0f0f0;
+  color: #191813;
+  text-shadow: none;
 }
 
-/* Progress bar for container capacity */
-.container-capacity-bar,
-.encumbrance .meter.progress,
-.progress-bar.encumbrance,
-.tidy5e-sheet .progress-bar,
-.item-list .progress {
-    background: #ddd;
-    height: 8px;
-    border-radius: 4px;
-    overflow: hidden;
-    position: relative;
+/* Цвета редкости */
+.weighty-container-reduction-display.rarity-common { color: var(--dnd5e-color-rarity-common, #5E5E5E); border-color: var(--dnd5e-color-rarity-common, #5E5E5E); }
+.weighty-container-reduction-display.rarity-uncommon { color: var(--dnd5e-color-rarity-uncommon, #167008); border-color: var(--dnd5e-color-rarity-uncommon, #167008); }
+.weighty-container-reduction-display.rarity-rare { color: var(--dnd5e-color-rarity-rare, #003A98); border-color: var(--dnd5e-color-rarity-rare, #003A98); }
+.weighty-container-reduction-display.rarity-very-rare { color: var(--dnd5e-color-rarity-very-rare, #51008A); border-color: var(--dnd5e-color-rarity-very-rare, #51008A); }
+.weighty-container-reduction-display.rarity-legendary { color: var(--dnd5e-color-rarity-legendary, #A85D00); border-color: var(--dnd5e-color-rarity-legendary, #A85D00); }
+.weighty-container-reduction-display.rarity-artifact { color: var(--dnd5e-color-rarity-artifact, #8A0000); border-color: var(--dnd5e-color-rarity-artifact, #8A0000); }
+
+/* Стиль для отображения эффективного веса на листе актора */
+.inventory-list .item .item-weight .weighty-effective-weight {
+  font-style: italic;
+  color: #555;
+  font-size: 0.9em;
+  margin-left: 3px;
 }
 
-.container-capacity-bar::before,
-.encumbrance .meter.progress::before,
-.progress-bar.encumbrance::before,
-.tidy5e-sheet .progress-bar::before,
-.item-list .progress::before {
-    content: '';
-    display: block;
-    height: 100%;
-    width: var(--bar-percentage, 0%);
-    background: #4caf50;
-    transition: width 0.3s ease;
-}
-
-/* Weight value display */
-.encumbrance-value,
-.container-weight-value,
-.tidy5e-sheet .weight-value,
-.item-list .weight-text {
-    font-size: 0.85em;
-    color: #333;
-}
-
-/* Effective weight display on actor sheet */
-.weighty-effective-weight {
-    font-size: 0.8em;
-    color: #555;
-    margin-left: 4px;
-}
-
-/* Ensure compatibility with Tidy 5e Sheets */
-.tidy5e-sheet .weighty-container-ui-wrapper {
-    margin: 4px 0;
-}
-
-.tidy5e-sheet .item-weight,
-.tidy5e-sheet .weight {
-    display: inline-flex;
-    align-items: center;
-}
+/* Стиль для кастомного уведомления */
+/* .notification.weighty-notification { */
+  /* border: 2px solid var(--dnd5e-color-rarity-rare, #003A98); */
+  /* background-color: rgba(10, 10, 25, 0.85); */
+  /* color: #eee; */
+  /* Пока закомментировано, т.к. customClass в ui.notifications тоже закомментирован */
+/* } */

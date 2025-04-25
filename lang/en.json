@@ -1,17 +1,16 @@
 {
-  "WEIGHTYCONTAINERS.SettingGMOnlyConfig": "Restrict Configuration to GM Only",
-  "WEIGHTYCONTAINERS.SettingGMOnlyConfigHint": "If enabled, only the Game Master can configure weight reduction for containers.",
-  "WEIGHTYCONTAINERS.SettingCapacityMessageName": "Container Capacity Exceeded Message",
-  "WEIGHTYCONTAINERS.SettingCapacityMessageHint": "Customize the message shown when a container's weight capacity is exceeded.",
-  "WEIGHTYCONTAINERS.DefaultCapacityMessage": "Container capacity exceeded.",
-  "WEIGHTYCONTAINERS.CapacityExceeded": "Container capacity exceeded.",
-  "WEIGHTYCONTAINERS.WeightReductionLabel": "Weight Reduction",
+  "WEIGHTYCONTAINERS.SettingGMOnlyConfig": "Restrict Config Button to GM",
+  "WEIGHTYCONTAINERS.SettingGMOnlyConfigHint": "If checked, only the Game Master can see and use the weight reduction configuration button on container sheets.",
   "WEIGHTYCONTAINERS.ConfigButtonTooltip": "Configure Weight Reduction",
-  "WEIGHTYCONTAINERS.ConfigPrompt": "Weight Reduction Percentage (0-100):",
   "WEIGHTYCONTAINERS.ConfigWindowTitle": "Configure Container Weight Reduction",
+  "WEIGHTYCONTAINERS.ConfigPrompt": "Enter weight reduction percentage (0-100):",
   "WEIGHTYCONTAINERS.ConfigSave": "Save",
   "WEIGHTYCONTAINERS.ConfigCancel": "Cancel",
   "WEIGHTYCONTAINERS.InvalidPercentage": "Please enter a valid percentage between 0 and 100.",
-  "WEIGHTYCONTAINERS.ErrorSaving": "Failed to save weight reduction setting.",
-  "WEIGHTYCONTAINERS.ItemWeightLabel": "Effective Weight"
+  "WEIGHTYCONTAINERS.WeightReductionLabel": "Weight Reduction:",
+  "WEIGHTYCONTAINERS.CapacityExceeded": "Cannot add/increase item. Container '{containerName}' capacity exceeded.",
+  "WEIGHTYCONTAINERS.CapacityWouldExceed": "Cannot add/increase item. Container '{containerName}' capacity would be exceeded.",
+  "WEIGHTYCONTAINERS.ItemWeightLabel": "Effective Weight",
+  "WEIGHTYCONTAINERS.SettingCapacityMessageName": "Capacity Exceeded Message",
+  "WEIGHTYCONTAINERS.SettingCapacityMessageHint": "The notification message displayed when trying to exceed container capacity. Leave empty to use default system message (if available)."
 }
