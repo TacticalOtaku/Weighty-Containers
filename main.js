@@ -1,9 +1,8 @@
-// weighty-containers/main.js - Стабильная версия (только предметы)
+// weighty-containers/main.js - Финальная стабильная версия 1.4.0
 
 const MODULE_ID = 'weighty-containers';
 const FLAG_WEIGHT_REDUCTION = 'weightReduction';
-const FLAG_REDUCES_CURRENCY = 'reducesCurrencyWeight'; // Флаг оставляем, но он не используется в расчетах веса/лимита
-let libWrapper; // Оставляем, но не используем для патчинга
+const FLAG_REDUCES_CURRENCY = 'reducesCurrencyWeight'; // Оставляем флаг, но он ни на что не влияет
 
 // --- Helper Functions ---
 
@@ -28,7 +27,7 @@ function getWeightReductionPercent(containerItem) {
     if (!containerItem || typeof containerItem !== 'object' || !isActualWeightContainer(containerItem)) return 0;
     let flagValue = undefined;
     try { flagValue = containerItem.getFlag(MODULE_ID, FLAG_WEIGHT_REDUCTION); }
-    catch (e) { console.error(`${MODULE_ID} | Error calling getFlag for ${containerItem?.name}:`, e); flagValue = foundry.utils.getProperty(containerItem, `flags.${MODULE_ID}.${FLAG_WEIGHT_REDUCTION}`); }
+    catch (e) { /* Игнорируем ошибку чтения флага */ flagValue = foundry.utils.getProperty(containerItem, `flags.${MODULE_ID}.${FLAG_WEIGHT_REDUCTION}`); }
     return Number(flagValue) || 0;
 }
 
@@ -45,7 +44,7 @@ function getBaseItemWeight(itemOrData) {
     else if (typeof weightSource === 'string') baseWeight = parseFloat(weightSource) || 0;
     else if (typeof weightSource === 'object' && weightSource !== null && typeof weightSource.value === 'number') baseWeight = Number(weightSource.value) || 0;
     else baseWeight = 0;
-    if (isNaN(baseWeight)) { return 0; }
+    if (isNaN(baseWeight)) return 0;
     return baseWeight;
 }
 
@@ -122,7 +121,6 @@ function getRarityClassForReduction(reductionPercent) {
 
 Hooks.once('init', () => {
     console.log(`${MODULE_ID} | HOOK: init`);
-    // Не проверяем libWrapper, так как не используем его для патчинга
     try {
         game.settings.register(MODULE_ID, 'gmOnlyConfig', { name: game.i18n.localize("WEIGHTYCONTAINERS.SettingGMOnlyConfig"), hint: game.i18n.localize("WEIGHTYCONTAINERS.SettingGMOnlyConfigHint"), scope: 'world', config: true, type: Boolean, default: true, requiresReload: false });
         game.settings.register(MODULE_ID, 'capacityExceededMessage', { name: "WEIGHTYCONTAINERS.SettingCapacityMessageName", hint: "WEIGHTYCONTAINERS.SettingCapacityMessageHint", scope: 'world', config: true, type: String, default: "Больно ты дохуя взял", requiresReload: false });
@@ -134,12 +132,9 @@ Hooks.once('setup', () => {
     console.log(`${MODULE_ID} | HOOK: setup`);
 });
 
-// --- Патчинг УДАЛЕН ---
-
 Hooks.once('ready', () => {
     console.log(`${MODULE_ID} | HOOK: ready`);
-    // Никакого патчинга здесь
-    console.log(`${MODULE_ID} | Module Ready`);
+    console.log(`${MODULE_ID} | Module Ready (Encumbrance calculation is NOT patched)`);
 });
 
 
@@ -147,17 +142,16 @@ Hooks.once('ready', () => {
  * Добавляем UI элементы на лист контейнера.
  */
 Hooks.on('renderItemSheet', (app, html, data) => {
-    if (!(app instanceof ItemSheet) || !app.object) return;
+    // ... (Код renderItemSheet без изменений, отображает вес ТОЛЬКО предметов) ...
+     if (!(app instanceof ItemSheet) || !app.object) return;
     const item = app.object;
     const isWeightContainer = isActualWeightContainer(item);
     const targetBlock = html.find('header.sheet-header .middle.identity-info');
     if (targetBlock.length === 0) return;
     targetBlock.find('.weighty-container-ui-wrapper').remove();
     const detailsTab = html.find('.tab.details[data-tab="details"]');
-    if (detailsTab.length > 0) detailsTab.find('.form-group.reduces-currency').remove(); // Удаляем чекбокс, если он остался
-
+    if (detailsTab.length > 0) detailsTab.find('.form-group.reduces-currency').remove();
     if (!isWeightContainer) return;
-
     const reductionPercent = getWeightReductionPercent(item);
     const canConfigure = game.user?.isGM || !game.settings.get(MODULE_ID, 'gmOnlyConfig');
     const rarityClass = getRarityClassForReduction(reductionPercent);
@@ -176,11 +170,10 @@ Hooks.on('renderItemSheet', (app, html, data) => {
         });
         uiWrapper.append(configButton);
     }
-    // Чекбокс для валюты НЕ добавляем
+    // Чекбокс валюты НЕ добавляем, так как она не влияет на лимит контейнера
+    /* if (detailsTab.length > 0) { ... } */
     targetBlock.append(uiWrapper);
     try { if (app.rendered) app.setPosition({ height: "auto" }); } catch (e) { /* Игнорируем */ }
-
-    // Отображение веса на листе контейнера (только предметы)
     if (isWeightContainer && app.actor) {
         try {
             const displayItemWeight = calculateCurrentContainerItemWeight(item, app.actor); // Вес только предметов
@@ -205,7 +198,6 @@ Hooks.on('renderItemSheet', (app, html, data) => {
  */
 Hooks.on('preCreateItem', (itemDoc, createData, options, userId) => {
     // Использует calculateCurrentContainerItemWeight для проверки
-    // ... (код preCreateItem без изменений) ...
     const parentActor = itemDoc.parent; const containerId = foundry.utils.getProperty(createData, 'system.container'); if (!(parentActor instanceof Actor) || !containerId) return true; if (itemDoc.isTemporary) return true; const actor = parentActor; const container = actor.items.get(containerId); if (!container || !isActualWeightContainer(container)) return true; const containerMaxWeight = Number(foundry.utils.getProperty(container, "system.capacity.weight.value") ?? 0); if (containerMaxWeight <= 0) return true; let effectiveWeightToAdd = 0; try { const tempItemData = foundry.utils.mergeObject(itemDoc.toObject(false), createData ?? {}); const itemToAddQuantity = Number(foundry.utils.getProperty(tempItemData, 'system.quantity') ?? 1); const tempItemDoc = new Item(tempItemData, { temporary: true }); effectiveWeightToAdd = getEffectiveItemWeightInContainer(tempItemDoc, actor, container) * itemToAddQuantity; } catch (err) { console.error(`${MODULE_ID} | ERROR preCreateItem: Failed calc weight.`, err); return false; } if (isNaN(effectiveWeightToAdd)) { console.error(`${MODULE_ID} | ERROR preCreateItem: effectiveWeightToAdd is NaN.`); return false; } const currentItemWeight = calculateCurrentContainerItemWeight(container, actor); if (isNaN(currentItemWeight)) { console.error(`${MODULE_ID} | ERROR preCreateItem: currentItemWeight is NaN.`); return false; } const potentialTotalWeight = currentItemWeight + effectiveWeightToAdd; const tolerance = 0.001; if (potentialTotalWeight > containerMaxWeight + tolerance) { const customMessage = game.settings.get(MODULE_ID, 'capacityExceededMessage') || "Container capacity exceeded."; console.warn(`${MODULE_ID} | BLOCKED preCreateItem: Limit exceeded.`); ui.notifications.warn(customMessage); return false; } return true;
 });
 
@@ -213,9 +205,90 @@ Hooks.on('preCreateItem', (itemDoc, createData, options, userId) => {
  * Хук для проверки вместимости ПЕРЕД обновлением предмета (только предметы).
  */
 Hooks.on('preUpdateItem', (itemDoc, change, options, userId) => {
-    // Использует calculateCurrentContainerItemWeight для проверки
-    // ... (код preUpdateItem без изменений) ...
-    if (!(itemDoc.parent instanceof Actor)) return true; const actor = itemDoc.parent; const targetContainerId = foundry.utils.getProperty(change, 'system.container'); const isChangingContainer = foundry.utils.hasProperty(change, 'system.container'); const originalContainerId = foundry.utils.getProperty(itemDoc, "system.container"); const oldQuantity = foundry.utils.getProperty(itemDoc, "system.quantity") ?? 1; const newQuantity = foundry.utils.getProperty(change, 'system.quantity') ?? oldQuantity; const isChangingQuantity = foundry.utils.hasProperty(change, 'system.quantity'); let isMovingIntoContainer = false; let isQuantityIncreaseInContainer = false; let checkContainerId = null; if (isChangingContainer && targetContainerId && targetContainerId !== originalContainerId) { isMovingIntoContainer = true; checkContainerId = targetContainerId; } else if (isChangingContainer && !targetContainerId && originalContainerId) return true; const finalContainerId = isChangingContainer ? targetContainerId : originalContainerId; if (isChangingQuantity && newQuantity > oldQuantity && finalContainerId) { isQuantityIncreaseInContainer = true; if (!checkContainerId) checkContainerId = finalContainerId; } else if (isChangingQuantity && newQuantity < oldQuantity && isMovingIntoContainer) { if (!checkContainerId) checkContainerId = targetContainerId; } else if (isChangingQuantity && newQuantity < oldQuantity && !isMovingIntoContainer) return true; if (!checkContainerId) return true; const container = actor.items.get(checkContainerId); if (!container || !isActualWeightContainer(container)) return true; const containerMaxWeight = Number(foundry.utils.getProperty(container, "system.capacity.weight.value") ?? 0); if (containerMaxWeight <= 0) return true; let effectiveSingleItemWeight = 0; try { const changedItemData = foundry.utils.mergeObject(itemDoc.toObject(false), change ?? {}); const tempChangedItemDoc = new Item(changedItemData, { temporary: true }); effectiveSingleItemWeight = getEffectiveItemWeightInContainer(tempChangedItemDoc, actor, container); } catch (err) { console.error(`${MODULE_ID} | ERROR preUpdateItem: Failed calc weight.`, err); return false; } if (isNaN(effectiveSingleItemWeight)) { console.error(`${MODULE_ID} | ERROR preUpdateItem: effectiveSingleItemWeight is NaN.`); return false; } const currentItemWeight = calculateCurrentContainerItemWeight(container, actor); if (isNaN(currentItemWeight)) { console.error(`${MODULE_ID} | ERROR preUpdateItem: currentItemWeight is NaN.`); return false; } let futureItemWeight = 0; let logReason = ""; if (isMovingIntoContainer) { const weightOfMovedStack = effectiveSingleItemWeight * newQuantity; if (isNaN(weightOfMovedStack)) { logReason = "NaN Error: weightOfMovedStack"; futureItemWeight = NaN; } else { futureItemWeight = currentItemWeight + weightOfMovedStack; logReason = `Move ${newQuantity} items`; } } else if (isQuantityIncreaseInContainer && checkContainerId === finalContainerId) { const quantityChange = newQuantity - oldQuantity; const addedWeight = effectiveSingleItemWeight * quantityChange; if (isNaN(addedWeight)) { logReason = "NaN Error: addedWeight"; futureItemWeight = NaN; } else { futureItemWeight = currentItemWeight + addedWeight; logReason = `Increase by ${quantityChange}`; } } else { return true; } if (isNaN(futureItemWeight)) { console.error(`${MODULE_ID} | ERROR preUpdateItem: futureItemWeight is NaN. Reason: ${logReason}`); return false; } const tolerance = 0.001; if (futureItemWeight > containerMaxWeight + tolerance) { const customMessage = game.settings.get(MODULE_ID, 'capacityExceededMessage') || "Container capacity exceeded."; console.warn(`${MODULE_ID} | BLOCKED preUpdateItem: Limit exceeded.`); ui.notifications.warn(customMessage); return false; } return true;
+    if (!(itemDoc.parent instanceof Actor)) return true;
+    const actor = itemDoc.parent;
+    const targetContainerId = foundry.utils.getProperty(change, 'system.container');
+    const isChangingContainer = foundry.utils.hasProperty(change, 'system.container');
+    const originalContainerId = foundry.utils.getProperty(itemDoc, "system.container");
+    const oldQuantity = Number(foundry.utils.getProperty(itemDoc, "system.quantity") ?? 1); // Убедимся что число
+    const newQuantity = Number(foundry.utils.getProperty(change, 'system.quantity') ?? oldQuantity); // Убедимся что число
+    const isChangingQuantity = foundry.utils.hasProperty(change, 'system.quantity');
+
+    let isMovingIntoContainer = false;
+    let isQuantityIncrease = false; // Просто флаг увеличения кол-ва
+    let checkContainerId = null;
+
+    // Определяем контейнер для проверки
+    if (isChangingContainer && targetContainerId && targetContainerId !== originalContainerId) {
+        isMovingIntoContainer = true; checkContainerId = targetContainerId;
+    } else if (isChangingQuantity && newQuantity > oldQuantity && originalContainerId) { // Увеличиваем кол-во в текущем контейнере
+        isQuantityIncrease = true; checkContainerId = originalContainerId;
+    } else {
+        return true; // Другие случаи (перемещение из, уменьшение кол-ва без перемещения и т.д.) не требуют проверки
+    }
+
+    if (!checkContainerId) return true; // На всякий случай
+
+    const container = actor.items.get(checkContainerId);
+    if (!container || !isActualWeightContainer(container)) return true; // Целевой контейнер невалиден
+
+    const containerMaxWeight = Number(foundry.utils.getProperty(container, "system.capacity.weight.value") ?? 0);
+    if (containerMaxWeight <= 0) return true; // Нет лимита
+
+    // --- ИСПРАВЛЕННЫЙ РАСЧЕТ БУДУЩЕГО ВЕСА ---
+    let effectiveWeightChange = 0;
+    let futureTotalItemWeight = 0; // Будущий вес ВСЕХ предметов в контейнере
+
+    try {
+        // Считаем вес изменяемого/перемещаемого предмета ПОСЛЕ изменений
+        const changedItemData = foundry.utils.mergeObject(itemDoc.toObject(false), change ?? {});
+        const tempChangedItemDoc = new Item(changedItemData, { temporary: true });
+        const effectiveSingleWeightAfterChange = getEffectiveItemWeightInContainer(tempChangedItemDoc, actor, container);
+
+        if (isNaN(effectiveSingleWeightAfterChange)) throw new Error("Effective single weight is NaN");
+
+        // Считаем текущий вес ВСЕХ ПРЕДМЕТОВ в целевом контейнере
+        const currentItemWeight = calculateCurrentContainerItemWeight(container, actor);
+        if (isNaN(currentItemWeight)) throw new Error("Current item weight is NaN");
+
+        if (isMovingIntoContainer) {
+            // Добавляем вес всего нового стака
+            effectiveWeightChange = effectiveSingleWeightAfterChange * newQuantity;
+            if (isNaN(effectiveWeightChange)) throw new Error("Weight change (move) is NaN");
+            futureTotalItemWeight = currentItemWeight + effectiveWeightChange;
+        } else if (isQuantityIncrease) {
+            // Увеличиваем количество существующего предмета
+            // Сначала "вычитаем" старый вес этого предмета из общего
+            const effectiveSingleWeightBeforeChange = getEffectiveItemWeightInContainer(itemDoc, actor, container);
+            if (isNaN(effectiveSingleWeightBeforeChange)) throw new Error("Effective single weight (before) is NaN");
+            const currentWeightWithoutThisStack = currentItemWeight - (effectiveSingleWeightBeforeChange * oldQuantity);
+            // Теперь добавляем новый вес этого стака
+            const newStackWeight = effectiveSingleWeightAfterChange * newQuantity;
+            if (isNaN(newStackWeight)) throw new Error("New stack weight is NaN");
+            futureTotalItemWeight = currentWeightWithoutThisStack + newStackWeight;
+        } else {
+            return true; // Не должно произойти, но на всякий случай
+        }
+
+    } catch (err) {
+        console.error(`${MODULE_ID} | ERROR preUpdateItem: Failed calc weight.`, err);
+        return false;
+    }
+
+    if (isNaN(futureTotalItemWeight)) { console.error(`${MODULE_ID} | ERROR preUpdateItem: futureTotalItemWeight is NaN.`); return false; }
+
+    const tolerance = 0.001;
+    // console.log(`${MODULE_ID} | DEBUG: preUpdateItem: Future Items Weight: ${futureTotalItemWeight.toFixed(5)}, Max: ${containerMaxWeight}`);
+
+    if (futureTotalItemWeight > containerMaxWeight + tolerance) {
+        const customMessage = game.settings.get(MODULE_ID, 'capacityExceededMessage') || "Container capacity exceeded.";
+        console.warn(`${MODULE_ID} | BLOCKED preUpdateItem: Limit exceeded.`);
+        ui.notifications.warn(customMessage);
+        return false;
+    }
+
+    // console.log(`${MODULE_ID} | ALLOWED preUpdateItem: Within limit.`);
+    return true;
 });
 
 
@@ -224,7 +297,7 @@ Hooks.on('preUpdateItem', (itemDoc, change, options, userId) => {
  */
 Hooks.on('renderActorSheet', (app, html, data) => {
     // ... (код renderActorSheet без изменений) ...
-    if (!(app instanceof ActorSheet) || !app.actor || ['npc', 'vehicle'].includes(app.actor.type)) return; const actor = app.actor; html.find('.inventory-list .item[data-item-id]').each((index, element) => { const itemId = element.dataset.itemId; if (!itemId) return; const item = actor.items.get(itemId); const containerId = foundry.utils.getProperty(item, "system.container"); const weightCell = $(element).find('.item-weight'); const existingSpan = weightCell.find('.weighty-effective-weight'); if (!containerId) { existingSpan.remove(); return; } const container = actor.items.get(containerId); if (!container || !isActualWeightContainer(container)) { existingSpan.remove(); return; } const reductionPercent = getWeightReductionPercent(container); if (reductionPercent <= 0) { existingSpan.remove(); return; } const effectiveWeight = getEffectiveItemWeight(item, actor); const baseWeight = getBaseItemWeight(item); if (Math.abs(effectiveWeight - baseWeight) < 0.001) { existingSpan.remove(); return; } if (weightCell.length > 0) { const displayWeight = game.settings.get("dnd5e", "metricWeightUnits") ? (effectiveWeight * (game.settings.get("dnd5e", "metricWeightMultiplier") ?? 1)).toFixed(2) : effectiveWeight.toFixed(2); const weightUnits = game.settings.get("dnd5e", "metricWeightUnits") ? game.settings.get("dnd5e", "metricWeightLabel") : game.i18n.localize("DND5E.AbbreviationLbs"); const effectiveWeightText = `(${game.i18n.localize('WEIGHTYCONTAINERS.ItemWeightLabel')}: ${displayWeight} ${weightUnits})`; if (existingSpan.length) { existingSpan.text(effectiveWeightText); } else { weightCell.append(`<span class="weighty-effective-weight">${effectiveWeightText}</span>`); } } });
+     if (!(app instanceof ActorSheet) || !app.actor || ['npc', 'vehicle'].includes(app.actor.type)) return; const actor = app.actor; html.find('.inventory-list .item[data-item-id]').each((index, element) => { const itemId = element.dataset.itemId; if (!itemId) return; const item = actor.items.get(itemId); const containerId = foundry.utils.getProperty(item, "system.container"); const weightCell = $(element).find('.item-weight'); const existingSpan = weightCell.find('.weighty-effective-weight'); if (!containerId) { existingSpan.remove(); return; } const container = actor.items.get(containerId); if (!container || !isActualWeightContainer(container)) { existingSpan.remove(); return; } const reductionPercent = getWeightReductionPercent(container); if (reductionPercent <= 0) { existingSpan.remove(); return; } const effectiveWeight = getEffectiveItemWeight(item, actor); const baseWeight = getBaseItemWeight(item); if (Math.abs(effectiveWeight - baseWeight) < 0.001) { existingSpan.remove(); return; } if (weightCell.length > 0) { const displayWeight = game.settings.get("dnd5e", "metricWeightUnits") ? (effectiveWeight * (game.settings.get("dnd5e", "metricWeightMultiplier") ?? 1)).toFixed(2) : effectiveWeight.toFixed(2); const weightUnits = game.settings.get("dnd5e", "metricWeightUnits") ? game.settings.get("dnd5e", "metricWeightLabel") : game.i18n.localize("DND5E.AbbreviationLbs"); const effectiveWeightText = `(${game.i18n.localize('WEIGHTYCONTAINERS.ItemWeightLabel')}: ${displayWeight} ${weightUnits})`; if (existingSpan.length) { existingSpan.text(effectiveWeightText); } else { weightCell.append(`<span class="weighty-effective-weight">${effectiveWeightText}</span>`); } } });
 });
 
 /**
