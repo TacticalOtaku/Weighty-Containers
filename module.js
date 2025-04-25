@@ -1,7 +1,8 @@
 // --- Изменения в начале ---
-const MODULE_ID = 'weighty-containers'; // <--- Изменено
+const MODULE_ID = 'weighty-containers';
 const FLAG_REDUCTION_PERCENT = 'weightReductionPercent';
 const FLAG_ORIGINAL_WEIGHT = 'originalWeight';
+const INTERNAL_UPDATE_FLAG = 'WEIGHTY_CONTAINERS_INTERNAL'; // Flag for internal updates
 
 // --- ФУНКЦИИ ХЕЛПЕРЫ (без изменений в логике, только MODULE_ID) ---
 
@@ -11,7 +12,6 @@ const FLAG_ORIGINAL_WEIGHT = 'originalWeight';
  * @returns {number} Процент снижения (0-100).
  */
 function getReductionPercent(containerItem) {
-    // Используем обновленный MODULE_ID для получения флага
     return containerItem?.getFlag(MODULE_ID, FLAG_REDUCTION_PERCENT) ?? 0;
 }
 
@@ -21,7 +21,6 @@ function getReductionPercent(containerItem) {
  * @returns {number | null} Оригинальный вес или null.
  */
 function getOriginalWeight(item) {
-    // Используем обновленный MODULE_ID для получения флага
     return item?.getFlag(MODULE_ID, FLAG_ORIGINAL_WEIGHT) ?? null;
 }
 
@@ -38,7 +37,6 @@ function calculateContainerContentsWeight(containerItem, actor) {
         if (item.system.container?.id !== containerItem.id) {
             return acc;
         }
-        // Используем текущий вес предмета (который может быть уже снижен)
         const weight = item.system.weight ?? 0;
         const quantity = item.system.quantity ?? 1;
         return acc + (weight * quantity);
@@ -50,111 +48,93 @@ function calculateContainerContentsWeight(containerItem, actor) {
  * Сохраняет оригинальный вес во флаге.
  * @param {Item5e} item - Предмет, к которому применяется снижение.
  * @param {Item5e} containerItem - Контейнер, определяющий снижение.
+ * @param {object} [context={}] - Контекст операции для предотвращения рекурсии.
  * @returns {Promise<void>}
  */
-async function applyWeightReduction(item, containerItem) {
+async function applyWeightReduction(item, containerItem, context = {}) {
     const reductionPercent = getReductionPercent(containerItem);
-    if (reductionPercent <= 0 || reductionPercent > 100) return; // Нет снижения или некорректный процент
+    if (reductionPercent <= 0 || reductionPercent > 100) return;
 
-    const originalWeight = getOriginalWeight(item) ?? item.system.weight; // Берем из флага, если есть, иначе текущий
+    const originalWeight = getOriginalWeight(item) ?? item.system.weight;
     const currentWeight = item.system.weight;
     const reductionFactor = 1 - (reductionPercent / 100);
-    const reducedWeight = Math.max(0, originalWeight * reductionFactor); // Вес не может быть отрицательным
+    const reducedWeight = Math.max(0, originalWeight * reductionFactor);
 
-    // Не обновляем, если вес уже снижен и не изменился (или если оригинальный вес 0)
     if (originalWeight === 0 || Math.abs(currentWeight - reducedWeight) < 0.001) {
-        // Если оригинальный вес был 0, но флаг не стоял, поставим его для консистентности
-         if (originalWeight === 0 && getOriginalWeight(item) === null) {
-             // Используем обновленный MODULE_ID для установки флага
-             await item.setFlag(MODULE_ID, FLAG_ORIGINAL_WEIGHT, 0);
-         }
+        if (originalWeight === 0 && getOriginalWeight(item) === null) {
+            await item.setFlag(MODULE_ID, FLAG_ORIGINAL_WEIGHT, 0);
+        }
         return;
     }
 
     console.log(`${MODULE_ID} | Applying reduction (${reductionPercent}%) to ${item.name}. Original: ${originalWeight}, New: ${reducedWeight}`);
-    // Сначала устанавливаем флаг, потом обновляем вес
-    // Используем обновленный MODULE_ID для установки флага
     await item.setFlag(MODULE_ID, FLAG_ORIGINAL_WEIGHT, originalWeight);
-    await item.update({'system.weight': reducedWeight});
+    // Добавляем флаг в контекст при обновлении
+    const updateContext = foundry.utils.mergeObject(context, { [INTERNAL_UPDATE_FLAG]: true });
+    await item.update({'system.weight': reducedWeight}, updateContext);
 }
 
 /**
  * Восстанавливает оригинальный вес предмета, если он покидает контейнер со снижением.
  * Удаляет флаг оригинального веса.
  * @param {Item5e} item - Предмет, для которого восстанавливается вес.
+ * @param {object} [context={}] - Контекст операции для предотвращения рекурсии.
  * @returns {Promise<void>}
  */
-async function restoreOriginalWeight(item) {
+async function restoreOriginalWeight(item, context = {}) {
     const originalWeight = getOriginalWeight(item);
 
-    // Если флага нет или вес уже совпадает с оригинальным, ничего не делаем
-    if (originalWeight === null || Math.abs(item.system.weight - originalWeight) < 0.001) {
-        // На всякий случай удалим флаг, если он есть, но вес совпадает
-        if (originalWeight !== null) {
-            // Используем обновленный MODULE_ID для удаления флага
-            await item.unsetFlag(MODULE_ID, FLAG_ORIGINAL_WEIGHT);
-        }
-        return;
-    }
+    if (originalWeight === null) return; // Нет флага - нечего восстанавливать
 
-    console.log(`${MODULE_ID} | Restoring original weight for ${item.name}. Original: ${originalWeight}`);
-    // Сначала обновляем вес, потом удаляем флаг
-    await item.update({'system.weight': originalWeight});
-    // Используем обновленный MODULE_ID для удаления флага
+    // Удаляем флаг ДО обновления веса
     await item.unsetFlag(MODULE_ID, FLAG_ORIGINAL_WEIGHT);
+
+    // Обновляем вес только если он отличается от оригинального
+    if (Math.abs(item.system.weight - originalWeight) > 0.001) {
+        console.log(`${MODULE_ID} | Restoring original weight for ${item.name}. Original: ${originalWeight}`);
+        // Добавляем флаг в контекст при обновлении
+        const updateContext = foundry.utils.mergeObject(context, { [INTERNAL_UPDATE_FLAG]: true });
+        await item.update({'system.weight': originalWeight}, updateContext);
+    }
 }
 
 
 // --- ХУКИ FOUNDRY VTT ---
 
 Hooks.once('init', () => {
-    // Используем обновленный MODULE_ID
     console.log(`${MODULE_ID} | Initializing Weighty Containers`);
 
-    // Регистрация настроек с обновленным MODULE_ID и ключами локализации
     game.settings.register(MODULE_ID, 'gmOnlyButton', {
-        // Используем обновленный ключ локализации
         name: game.i18n.localize("WEIGHTY_CONTAINERS.SETTINGS.gmOnlyButton"),
         hint: game.i18n.localize("WEIGHTY_CONTAINERS.SETTINGS.gmOnlyButtonHint"),
-        scope: 'world',     // Настройка на уровне мира
-        config: true,       // Показывать в меню настроек модуля
+        scope: 'world',
+        config: true,
         type: Boolean,
-        default: true,      // По умолчанию кнопка только для GM
-        requiresReload: false // Не требует перезагрузки для применения визуально
+        default: true,
+        requiresReload: false
     });
 
-    // --- Перехват методов для управления весом ---
-    // Используем libWrapper, если он активен, для лучшей совместимости
     if (game.modules.get('lib-wrapper')?.active) {
-        // Используем обновленный MODULE_ID для регистрации libWrapper
         libWrapper.register(MODULE_ID, 'CONFIG.Actor.documentClass.prototype.createEmbeddedDocuments', checkCapacityOnCreate, 'MIXED');
-        libWrapper.register(MODULE_ID, 'CONFIG.Item.documentClass.prototype.update', checkCapacityOnUpdate, 'MIXED');
-        libWrapper.register(MODULE_ID, 'CONFIG.Item.documentClass.prototype.update', handleItemContainerChange, 'WRAPPER');
-
+        // *** ОДНА регистрация для Item.update ***
+        libWrapper.register(MODULE_ID, 'CONFIG.Item.documentClass.prototype.update', combinedItemUpdateHandler, 'WRAPPER');
     } else {
-         // Fallback на стандартные хуки, если libWrapper не активен
-         // Стандартные хуки не требуют регистрации с ID модуля
-        Hooks.on('preCreateItem', onItemPreCreate); // Проверка перед созданием
-        Hooks.on('preUpdateItem', onItemPreUpdate); // Проверка перед обновлением
-        Hooks.on('updateItem', onItemUpdate);       // Действия после обновления (смена контейнера)
+        Hooks.on('preCreateItem', onItemPreCreate);
+        Hooks.on('preUpdateItem', onItemPreUpdate);
+        Hooks.on('updateItem', onItemUpdate); // Fallback обработчик после обновления
     }
 });
 
 // Хук для добавления элементов на лист контейнера
 Hooks.on('renderItemSheet5e', (app, html, data) => {
-    // Интересуют только листы КОНТЕЙНЕРОВ (тип 'container' или 'backpack')
-    // И только те, у которых есть ВЕСОВАЯ вместимость
     if (!['container', 'backpack'].includes(data.item?.type) || data.item?.system?.capacity?.type !== 'weight') {
         return;
     }
 
-    const item = app.object; // Получаем объект Item из приложения листа
+    const item = app.object;
     const currentReduction = getReductionPercent(item);
-    // Используем обновленный MODULE_ID для получения настройки
     const canConfigure = game.user.isGM || !game.settings.get(MODULE_ID, 'gmOnlyButton');
 
-    // Определение класса редкости для цвета
-    // Оставляем CSS классы прежними ('cwm-...') для простоты, чтобы не менять CSS файл
     let rarityClass = 'cwm-reduction-common';
     if (currentReduction >= 95) rarityClass = 'cwm-reduction-artifact';
     else if (currentReduction >= 85) rarityClass = 'cwm-reduction-legendary';
@@ -162,7 +142,6 @@ Hooks.on('renderItemSheet5e', (app, html, data) => {
     else if (currentReduction >= 50) rarityClass = 'cwm-reduction-rare';
     else if (currentReduction > 0) rarityClass = 'cwm-reduction-uncommon';
 
-    // HTML для отображения процента (с обновленными ключами локализации)
     const displayHtml = `
         <div class="cwm-weight-reduction-display ${rarityClass}" title="${game.i18n.format(`WEIGHTY_CONTAINERS.Rarity.${rarityClass.split('-')[2].charAt(0).toUpperCase() + rarityClass.split('-')[2].slice(1)}`)}">
             <span class="cwm-label">${game.i18n.localize("WEIGHTY_CONTAINERS.ContainerSheet.WeightReduction")}: </span>
@@ -170,14 +149,12 @@ Hooks.on('renderItemSheet5e', (app, html, data) => {
         </div>
     `;
 
-    // HTML для кнопки (с обновленными ключами локализации)
     const buttonHtml = canConfigure ? `
         <button type="button" class="cwm-configure-button" title="${game.i18n.localize("WEIGHTY_CONTAINERS.ContainerSheet.ConfigureReduction")}">
             <i class="fas fa-cog"></i>
         </button>
     ` : '';
 
-     // Обертка для выравнивания (используем старые CSS классы)
     const controlsContainerHtml = `
         <div class="cwm-controls-container">
             ${displayHtml}
@@ -185,34 +162,25 @@ Hooks.on('renderItemSheet5e', (app, html, data) => {
         </div>
     `;
 
-    // --- Внедрение HTML на лист ---
-    // Логика поиска места остается прежней
     const capacityWeightInput = html.find('input[name="system.capacity.value"]');
-    let targetElement = capacityWeightInput.closest('.form-group'); // Родительская группа формы
+    let targetElement = capacityWeightInput.closest('.form-group');
 
-    // Если не нашли стандартное поле веса (может быть кастомный лист?), попробуем найти заголовок Details
     if (!targetElement.length) {
-         targetElement = html.find('.tab[data-tab="details"]'); // Вкладка Details
+         targetElement = html.find('.tab[data-tab="details"]');
          if (targetElement.length) {
-             targetElement.prepend(controlsContainerHtml); // Вставить в начало вкладки
+             targetElement.prepend(controlsContainerHtml);
          } else {
-             // Крайний случай: вставить в начало формы
               html.find('form').first().prepend(controlsContainerHtml);
          }
     } else {
-         // Вставляем ПОСЛЕ группы с весом
         targetElement.after(controlsContainerHtml);
     }
 
-
-    // --- Добавление обработчика для кнопки ---
     if (canConfigure) {
-        // Используем старый CSS класс для поиска кнопки
         html.find('.cwm-configure-button').on('click', async (event) => {
             event.preventDefault();
             const currentVal = getReductionPercent(item);
 
-            // Используем обновленные ключи локализации для диалога
             new Dialog({
                 title: game.i18n.localize("WEIGHTY_CONTAINERS.Dialog.SetReductionTitle"),
                 content: `
@@ -229,34 +197,29 @@ Hooks.on('renderItemSheet5e', (app, html, data) => {
                 buttons: {
                     save: {
                         icon: '<i class="fas fa-save"></i>',
-                        label: game.i18n.localize("Save"), // Стандартный ключ Foundry
+                        label: game.i18n.localize("Save"),
                         callback: async (html) => {
                             const inputVal = html.find('input[name="reductionPercent"]').val();
                             const newPercentage = parseInt(inputVal, 10);
 
                             if (isNaN(newPercentage) || newPercentage < 0 || newPercentage > 100) {
-                                // Используем обновленный ключ локализации
                                 ui.notifications.warn(game.i18n.localize("WEIGHTY_CONTAINERS.Notifications.InvalidPercentage"));
-                                return false; // Предотвратить закрытие диалога
+                                return false;
                             }
 
                             console.log(`${MODULE_ID} | Setting reduction for ${item.name} to ${newPercentage}%`);
-                            // Используем обновленный MODULE_ID для установки флага
                             await item.setFlag(MODULE_ID, FLAG_REDUCTION_PERCENT, newPercentage);
-                            // Пересчитать вес всех предметов ВНУТРИ контейнера после изменения процента
                              await updateContainedItemsWeight(item.actor, item, newPercentage);
-                            // Не обязательно перерисовывать лист, если обновление флага само вызывает ререндер
-                             // app.render(true); // Можно раскомментировать, если авто-ререндер не сработает
+                             // Лист должен перерисоваться сам из-за изменения флага
                         }
                     },
                     cancel: {
                         icon: '<i class="fas fa-times"></i>',
-                        label: game.i18n.localize("Cancel") // Стандартный ключ Foundry
+                        label: game.i18n.localize("Cancel")
                     }
                 },
                 default: 'save',
                 render: html => {
-                     // Фокус на поле ввода при открытии диалога
                      html.find('input[name="reductionPercent"]').focus().select();
                 }
             }).render(true);
@@ -278,49 +241,44 @@ async function updateContainedItemsWeight(actor, containerItem, newReductionPerc
     const containedItems = actor.items.filter(i => i.system.container?.id === containerItem.id);
     const updates = [];
     const reductionFactor = 1 - (newReductionPercent / 100);
+    const internalContext = { [INTERNAL_UPDATE_FLAG]: true }; // Контекст для обновлений
 
     for (const item of containedItems) {
-        // Пытаемся получить оригинальный вес из флага
-        const originalWeight = getOriginalWeight(item); // Может быть null
-
-        // Если флага нет, но редукция применяется (newReductionPercent > 0),
-        // значит, этот предмет был добавлен до установки редукции или флаг потерялся.
-        // В этом случае считаем текущий вес оригинальным для применения новой редукции.
+        const originalWeight = getOriginalWeight(item);
         const baseWeightForCalc = originalWeight ?? item.system.weight;
 
-        // Если базвый вес 0, предмет ничего не весит в любом случае
         if (baseWeightForCalc === 0) {
-            // Если редукция снимается, и флаг был, удалим его
              if (newReductionPercent === 0 && originalWeight !== null) {
                  await item.unsetFlag(MODULE_ID, FLAG_ORIGINAL_WEIGHT);
              }
-             // Если редукция применяется к предмету с нулевым весом, поставим флаг для консистентности
              else if (newReductionPercent > 0 && originalWeight === null) {
                   await item.setFlag(MODULE_ID, FLAG_ORIGINAL_WEIGHT, 0);
              }
             continue;
         }
 
-        // Рассчитываем новый вес на основе базового
         const newWeight = Math.max(0, baseWeightForCalc * reductionFactor);
 
-        // Сохраняем/обновляем флаг с оригинальным весом, если редукция > 0
+        // Сохраняем/обновляем/удаляем флаг
         if (newReductionPercent > 0) {
-             await item.setFlag(MODULE_ID, FLAG_ORIGINAL_WEIGHT, baseWeightForCalc);
+            // Устанавливаем флаг, если он еще не установлен или неверен
+            if(originalWeight === null || Math.abs(originalWeight - baseWeightForCalc) > 0.001) {
+                 await item.setFlag(MODULE_ID, FLAG_ORIGINAL_WEIGHT, baseWeightForCalc);
+            }
+        } else if (originalWeight !== null) {
+             // Удаляем флаг, если редукция 0%
+             await item.unsetFlag(MODULE_ID, FLAG_ORIGINAL_WEIGHT);
         }
 
-        // Если вес реально нужно изменить
+        // Готовим обновление веса, если он изменился
         if (Math.abs(item.system.weight - newWeight) > 0.001) {
             updates.push({ _id: item.id, 'system.weight': newWeight });
-        }
-        // Если редукция стала 0, а вес и так был оригинальным (или стал им после расчета), удалим флаг
-        else if (newReductionPercent === 0 && originalWeight !== null) {
-             await item.unsetFlag(MODULE_ID, FLAG_ORIGINAL_WEIGHT);
         }
     }
 
     if (updates.length > 0) {
-        await actor.updateEmbeddedDocuments("Item", updates);
+        // Применяем все обновления веса разом с внутренним флагом
+        await actor.updateEmbeddedDocuments("Item", updates, internalContext);
     }
 }
 
@@ -339,198 +297,178 @@ async function updateContainedItemsWeight(actor, containerItem, newReductionPerc
  */
 async function checkCapacityOnCreate(wrapped, embeddedName, data, context) {
     if (embeddedName !== 'Item' || !Array.isArray(data) || data.length === 0) {
-        return wrapped(embeddedName, data, context); // Пропускаем, если не предметы
+        return wrapped(embeddedName, data, context);
     }
 
-    const actor = this; // this === Actor
+    const actor = this;
     const itemsToCreate = [];
     let capacityBlocked = false;
 
     for (const itemData of data) {
         const containerId = itemData.system?.container;
         if (!containerId) {
-            itemsToCreate.push(itemData); // Предмет не в контейнере, пропускаем проверку
+            itemsToCreate.push(itemData);
             continue;
         }
 
         const containerItem = actor.items.get(containerId);
         if (!containerItem || containerItem.system?.capacity?.type !== 'weight') {
-            itemsToCreate.push(itemData); // Нет контейнера или не весовая вместимость
+            itemsToCreate.push(itemData);
             continue;
         }
 
         const containerMaxWeight = containerItem.system.capacity.value ?? 0;
-        // Расчет текущего веса ДО добавления новых предметов
         const currentWeight = calculateContainerContentsWeight(containerItem, actor);
 
-        // Рассчитываем вес добавляемого предмета (с учетом возможного снижения в этом контейнере)
-        let itemWeight = itemData.system?.weight ?? 0;
+        let itemBaseWeight = itemData.system?.weight ?? 0; // Оригинальный вес из данных
         const quantity = itemData.system?.quantity ?? 1;
         const reductionPercent = getReductionPercent(containerItem);
-        if (reductionPercent > 0) {
-            // Применяем редукцию к БАЗОВОМУ весу из itemData
-            itemWeight = Math.max(0, itemWeight * (1 - reductionPercent / 100));
+        let reducedWeight = itemBaseWeight; // По умолчанию вес равен базовому
+
+        if (reductionPercent > 0 && itemBaseWeight > 0) {
+            reducedWeight = Math.max(0, itemBaseWeight * (1 - reductionPercent / 100));
         }
-        const addedWeight = itemWeight * quantity;
+        const addedWeight = reducedWeight * quantity;
 
         if (currentWeight + addedWeight > containerMaxWeight) {
-            // Используем обновленный ключ локализации
             ui.notifications.warn(game.i18n.format("WEIGHTY_CONTAINERS.Notifications.CapacityExceeded", { containerName: containerItem.name }));
             capacityBlocked = true;
-             // Не добавляем этот itemData в itemsToCreate
         } else {
-             // Перед добавлением в itemsToCreate, модифицируем вес в данных, если он был снижен
-             // Это гарантирует, что предмет создастся сразу со сниженным весом
-             if (reductionPercent > 0) {
-                 itemData.system.weight = itemWeight;
-                 // Устанавливаем флаг оригинального веса прямо в данных для создания
-                 // Используем пространство имен нашего модуля
-                 foundry.utils.setProperty(itemData, `flags.${MODULE_ID}.${FLAG_ORIGINAL_WEIGHT}`, itemData.system.weight / (1 - reductionPercent / 100)); // Сохраняем оригинальный вес
+             // Модифицируем данные перед добавлением к созданию
+             if (reductionPercent > 0 && itemBaseWeight > 0) {
+                 itemData.system.weight = reducedWeight; // Устанавливаем сниженный вес
+                 // Устанавливаем флаг оригинального веса
+                 foundry.utils.setProperty(itemData, `flags.${MODULE_ID}.${FLAG_ORIGINAL_WEIGHT}`, itemBaseWeight);
              }
-            itemsToCreate.push(itemData); // Проверка пройдена, добавляем к созданию
+            itemsToCreate.push(itemData);
         }
     }
 
-    // Если хотя бы один предмет был заблокирован, нужно вернуть результат только для разрешенных
     if (capacityBlocked) {
-        if (itemsToCreate.length === 0) return []; // Ничего не создаем
-        // Вызываем оригинальный метод только с разрешенными предметами
+        if (itemsToCreate.length === 0) return [];
+        // Вызываем оригинал только с разрешенными и модифицированными данными
         return wrapped(embeddedName, itemsToCreate, context);
     } else {
-        // Все предметы прошли проверку, вызываем оригинальный метод без изменений (но вес в data мог быть изменен)
+        // Все разрешены, вызываем оригинал (данные могли быть модифицированы)
         return wrapped(embeddedName, data, context);
     }
 }
 
 /**
- * Проверка вместимости при обновлении предмета (изменение количества) (libWrapper).
- * @param {function} wrapped Оригинальный метод.
+ * Единый обработчик для Item.update (libWrapper).
+ * Выполняет проверку вместимости ДО обновления и обработку смены контейнера/веса ПОСЛЕ.
+ * @param {function} wrapped Оригинальный метод Item.update.
  * @param {object} changes Данные для обновления.
  * @param {object} context Опции обновления.
  * @returns {Promise<Item5e>}
  */
-async function checkCapacityOnUpdate(wrapped, changes, context) {
-    const item = this; // this === Item
+async function combinedItemUpdateHandler(wrapped, changes, context) {
+    // --- 1. Логика ПРОВЕРКИ ВМЕСТИМОСТИ (ДО вызова wrapped) ---
+    const item = this; // this === Item до обновления
     const actor = item.actor;
 
-    // Проверяем только если изменяется количество И предмет находится в контейнере с весовым лимитом
+    // Проверяем только если:
+    // - изменяется количество НА УВЕЛИЧЕНИЕ
+    // - предмет в контейнере с весовым лимитом
+    // - это НЕ внутреннее обновление модуля
     const quantityChange = changes.system?.quantity;
-    const container = item.system?.container; // Текущий контейнер
+    const isQuantityIncrease = typeof quantityChange === 'number' && quantityChange > item.system.quantity;
+    const containerId = item.system?.container?.id;
 
-    // Пропускаем проверку, если:
-    // - нет актора
-    // - количество не меняется или не является числом
-    // - предмет не в контейнере
-    // - количество УМЕНЬШАЕТСЯ (не может превысить лимит)
-    // - это внутреннее обновление модуля (чтобы избежать зацикливания при смене контейнера)
-    if (!actor || typeof quantityChange !== 'number' || !container || quantityChange <= item.system.quantity || context?.WEIGHTY_CONTAINERS_INTERNAL) {
-        return wrapped(changes, context);
-    }
+    if (actor && isQuantityIncrease && containerId && !context?.[INTERNAL_UPDATE_FLAG]) {
+        const containerItem = actor.items.get(containerId);
+        if (containerItem && containerItem.system?.capacity?.type === 'weight') {
+            const containerMaxWeight = containerItem.system.capacity.value ?? 0;
+            // Используем текущий (сниженный) вес
+            const currentWeightWithoutItem = calculateContainerContentsWeight(containerItem, actor) - (item.system.weight * item.system.quantity);
+            const newItemTotalWeight = item.system.weight * quantityChange; // Вес с новым количеством
 
-    const containerItem = actor.items.get(container.id);
-    if (!containerItem || containerItem.system?.capacity?.type !== 'weight') {
-        return wrapped(changes, context); // Не тот контейнер
-    }
-
-    const containerMaxWeight = containerItem.system.capacity.value ?? 0;
-    // Рассчитываем ТЕКУЩИЙ вес БЕЗ этого предмета
-    // Используем текущий (возможно, сниженный) вес предмета и текущее количество
-    const currentWeightWithoutItem = calculateContainerContentsWeight(containerItem, actor) - (item.system.weight * item.system.quantity);
-
-    // Рассчитываем вес этого предмета с НОВЫМ количеством
-    // Используем ТЕКУЩИЙ (возможно, сниженный) вес предмета
-    const newItemTotalWeight = item.system.weight * quantityChange;
-
-    if (currentWeightWithoutItem + newItemTotalWeight > containerMaxWeight) {
-        // Используем обновленный ключ локализации
-        ui.notifications.warn(game.i18n.format("WEIGHTY_CONTAINERS.Notifications.CapacityExceeded", { containerName: containerItem.name }));
-        // Предотвращаем обновление, возвращая сам объект item без изменений
-        // Важно: просто вернуть item может быть недостаточно, лучше выбросить ошибку или изменить changes
-        delete changes.system.quantity; // Удаляем изменение количества из запроса
-        if (Object.keys(changes.system).length === 0) delete changes.system;
-        if (Object.keys(changes).length === 0) return item; // Если больше нет изменений, просто выходим
-
-        // Если остались другие изменения, продолжаем с ними
-        // Это предотвратит отмену других правок, если они были в том же запросе
-        return wrapped(changes, context);
-    }
-
-    // Вместимость позволяет, продолжаем обновление
-    return wrapped(changes, context);
-}
-
-/**
- * Обработка смены контейнера предмета (libWrapper).
- * Применяет/снимает редукцию веса.
- * @param {function} wrapped Оригинальный метод.
- * @param {object} changes Данные для обновления.
- * @param {object} context Опции обновления.
- * @returns {Promise<Item5e>}
- */
-async function handleItemContainerChange(wrapped, changes, context) {
-     // Проверяем, меняется ли контейнер ДО вызова wrapped, т.к. нам нужен previousContainerId
-    const isContainerChange = changes.system && 'container' in changes.system;
-    const previousContainerId = isContainerChange ? this.system.container?.id : null; // Контейнер ДО обновления (this = item)
-
-     // Сначала выполняем оригинальное обновление
-     const updatedItem = await wrapped(changes, context);
-
-    // Теперь обрабатываем смену контейнера, если она была
-    if (isContainerChange && updatedItem?.actor) {
-        const actor = updatedItem.actor;
-        const newContainerId = updatedItem.system.container?.id; // Контейнер ПОСЛЕ обновления
-
-        if (previousContainerId !== newContainerId) {
-            const previousContainer = actor.items.get(previousContainerId);
-            const newContainer = actor.items.get(newContainerId);
-
-            const hadReduction = previousContainer && getReductionPercent(previousContainer) > 0;
-            const hasReduction = newContainer && getReductionPercent(newContainer) > 0;
-
-            // Используем context флаг, чтобы внутренние update не вызывали рекурсию
-            const internalContext = { WEIGHTY_CONTAINERS_INTERNAL: true };
-
-            if (hadReduction && !hasReduction) {
-                // Переместили ИЗ контейнера с редукцией -> Восстановить вес
-                await restoreOriginalWeight(updatedItem); // restoreOriginalWeight сам делает update
-            } else if (!hadReduction && hasReduction) {
-                // Переместили В контейнер с редукцией -> Применить редукцию
-                await applyWeightReduction(updatedItem, newContainer); // applyWeightReduction сам делает update
-            } else if (hadReduction && hasReduction) {
-                // Переместили ИЗ одного с редукцией В другой с редукцией -> Пересчитать редукцию
-                // Сначала восстановим оригинальный вес (на случай если флаг неверный)
-                const originalWeight = getOriginalWeight(updatedItem) ?? updatedItem.system.weight; // Берем из флага или текущий
-                await updatedItem.unsetFlag(MODULE_ID, FLAG_ORIGINAL_WEIGHT); // Удаляем старый флаг
-                // Обновляем вес до оригинального (если он отличается) перед применением новой редукции
-                if (Math.abs(updatedItem.system.weight - originalWeight) > 0.001) {
-                    await updatedItem.update({'system.weight': originalWeight}, internalContext);
-                }
-                 // Теперь применяем новую редукцию (она сохранит новый флаг и обновит вес)
-                await applyWeightReduction(updatedItem, newContainer);
+            if (currentWeightWithoutItem + newItemTotalWeight > containerMaxWeight) {
+                ui.notifications.warn(game.i18n.format("WEIGHTY_CONTAINERS.Notifications.CapacityExceeded", { containerName: containerItem.name }));
+                // Отменяем ТОЛЬКО изменение количества, чтобы не сломать другие изменения
+                delete changes.system.quantity;
+                if (foundry.utils.isEmpty(changes.system)) delete changes.system;
+                // Если не осталось изменений, просто возвращаем исходный предмет
+                if (foundry.utils.isEmpty(changes)) return item;
+                // Иначе продолжаем с оставшимися изменениями ниже
             }
-            // Случай !hadReduction && !hasReduction не требует действий с весом
         }
-    } else if (changes.system && 'weight' in changes.system && !context?.WEIGHTY_CONTAINERS_INTERNAL && updatedItem?.actor && updatedItem.system.container) {
-        // Обработка изменения веса предмета ИЗВНЕ (не нашим модулем), когда он УЖЕ В КОНТЕЙНЕРЕ с редукцией
-        const actor = updatedItem.actor;
-        const container = actor.items.get(updatedItem.system.container.id);
-        if (container && getReductionPercent(container) > 0) {
-            // Предполагаем, что changes.system.weight - это НОВЫЙ ОРИГИНАЛЬНЫЙ вес
-            const newOriginalWeight = changes.system.weight;
-            // Сохраняем новый оригинальный вес во флаг
+    }
+
+    // --- 2. Вызов оригинального метода update ---
+    // Запоминаем состояние ДО обновления для сравнения ПОСЛЕ
+    const previousContainerId = item.system.container?.id;
+    const previousWeight = item.system.weight;
+    const wasInReducingContainer = previousContainerId && getReductionPercent(actor?.items?.get(previousContainerId)) > 0;
+    const hadOriginalWeightFlag = getOriginalWeight(item) !== null;
+
+    // Выполняем обновление
+    const updatedItem = await wrapped(changes, context);
+
+    // --- 3. Логика ПОСЛЕ обновления (с использованием updatedItem) ---
+    const currentActor = updatedItem.actor; // Actor может измениться при переносе между персонажами
+    if (!currentActor || context?.[INTERNAL_UPDATE_FLAG]) {
+        // Если нет актора или это внутреннее обновление, выходим
+        return updatedItem;
+    }
+
+    const newContainerId = updatedItem.system.container?.id;
+    const newContainer = newContainerId ? currentActor.items.get(newContainerId) : null;
+    const isInReducingContainer = newContainer && getReductionPercent(newContainer) > 0;
+    const weightChanged = changes.system && 'weight' in changes.system;
+    const containerChanged = changes.system && 'container' in changes.system;
+
+    // --- 3.1 Обработка смены контейнера ---
+    if (containerChanged && previousContainerId !== newContainerId) {
+        const internalContext = { [INTERNAL_UPDATE_FLAG]: true };
+
+        if (wasInReducingContainer && !isInReducingContainer) {
+            // Переместили ИЗ редукции -> Восстановить вес
+            await restoreOriginalWeight(updatedItem, internalContext);
+        } else if (!wasInReducingContainer && isInReducingContainer) {
+            // Переместили В редукцию -> Применить редукцию
+            await applyWeightReduction(updatedItem, newContainer, internalContext);
+        } else if (wasInReducingContainer && isInReducingContainer) {
+            // Переместили ИЗ редукции В редукцию -> Пересчитать редукцию
+            // Важно: applyWeightReduction берет вес из флага или ТЕКУЩИЙ вес updatedItem
+            // Если вес не менялся внешне, то текущий вес - это старый редуцированный.
+            // Нужно убедиться, что applyWeightReduction использует оригинальный вес из флага.
+            await applyWeightReduction(updatedItem, newContainer, internalContext);
+        }
+        // else: !wasInReducingContainer && !isInReducingContainer -> ничего не делаем
+    }
+    // --- 3.2 Обработка внешнего изменения веса предмета, когда он УЖЕ в контейнере с редукцией ---
+    // Срабатывает, только если контейнер НЕ менялся в этом же обновлении
+    else if (weightChanged && isInReducingContainer && previousContainerId === newContainerId) {
+         // Внешнее изменение веса (не нашим модулем). Считаем, что новый вес - это новый ОРИГИНАЛЬНЫЙ вес.
+         const newOriginalWeight = updatedItem.system.weight; // Вес после wrapped()
+         const currentFlagWeight = getOriginalWeight(updatedItem);
+
+         // Только если новый вес отличается от сохраненного во флаге (или флага нет)
+         if (currentFlagWeight === null || Math.abs(currentFlagWeight - newOriginalWeight) > 0.001) {
+            console.log(`${MODULE_ID} | External weight change detected for ${updatedItem.name} inside container. Recalculating reduced weight.`);
+            const internalContext = { [INTERNAL_UPDATE_FLAG]: true };
+            // Сначала установим флаг с новым оригинальным весом
             await updatedItem.setFlag(MODULE_ID, FLAG_ORIGINAL_WEIGHT, newOriginalWeight);
-            // Пересчитываем и применяем редуцированный вес
-            const reductionFactor = 1 - (getReductionPercent(container) / 100);
+            // Теперь пересчитаем и применим редуцированный вес
+            const reductionFactor = 1 - (getReductionPercent(newContainer) / 100);
             const newReducedWeight = Math.max(0, newOriginalWeight * reductionFactor);
-            // Обновляем вес предмета на редуцированный, если он отличается от того, что уже есть
-            // (важно: updatedItem.system.weight может уже содержать newOriginalWeight из-за wrapped выше)
+            // Обновляем вес, если он отличается от только что установленного
             if (Math.abs(updatedItem.system.weight - newReducedWeight) > 0.001) {
-                 await updatedItem.update({'system.weight': newReducedWeight}, { WEIGHTY_CONTAINERS_INTERNAL: true });
+                 await updatedItem.update({'system.weight': newReducedWeight}, internalContext);
             }
-        }
+         }
+    }
+    // --- 3.3 Обработка случая, когда предмет БЕЗ редукции, но у него остался флаг ---
+    // (например, баг или предыдущее состояние)
+    else if (!isInReducingContainer && hadOriginalWeightFlag && !containerChanged) {
+        // Предмет не в редуцирующем контейнере, но флаг есть. Восстановим вес.
+        console.warn(`${MODULE_ID} | Item ${updatedItem.name} is not in a reducing container but had a weight reduction flag. Restoring original weight.`);
+        await restoreOriginalWeight(updatedItem, { [INTERNAL_UPDATE_FLAG]: true });
     }
 
-     return updatedItem;
+
+    return updatedItem; // Возвращаем обновленный предмет
 }
 
 
@@ -538,238 +476,230 @@ async function handleItemContainerChange(wrapped, changes, context) {
 
 /**
  * Fallback: Проверка вместимости перед созданием предмета.
- * @param {Item} item - Документ создаваемого предмета.
- * @param {object} data - Данные для создания.
- * @param {object} options - Опции.
- * @param {string} userId - ID пользователя.
- * @returns {boolean} Возвращает false, чтобы отменить создание.
  */
 function onItemPreCreate(item, data, options, userId) {
-    if (game.userId !== userId) return true; // Только для пользователя, инициировавшего действие
+    if (game.userId !== userId) return true;
 
-    const actor = item.parent; // Actor
+    const actor = item.parent;
     const containerId = data.system?.container;
-    if (!actor || !containerId) return true; // Не в контейнере
+    if (!actor || !containerId) return true;
 
     const containerItem = actor.items.get(containerId);
-    if (!containerItem || containerItem.system?.capacity?.type !== 'weight') return true; // Не тот контейнер
+    if (!containerItem || containerItem.system?.capacity?.type !== 'weight') return true;
 
     const containerMaxWeight = containerItem.system.capacity.value ?? 0;
     const currentWeight = calculateContainerContentsWeight(containerItem, actor);
 
-    let itemWeight = data.system?.weight ?? 0;
+    let itemBaseWeight = data.system?.weight ?? 0;
     const quantity = data.system?.quantity ?? 1;
     const reductionPercent = getReductionPercent(containerItem);
-    let originalWeight = itemWeight; // Запоминаем оригинальный вес из данных
-    if (reductionPercent > 0) {
-        itemWeight = Math.max(0, itemWeight * (1 - reductionPercent / 100));
+    let reducedWeight = itemBaseWeight;
+
+    if (reductionPercent > 0 && itemBaseWeight > 0) {
+        reducedWeight = Math.max(0, itemBaseWeight * (1 - reductionPercent / 100));
     }
-    const addedWeight = itemWeight * quantity;
+    const addedWeight = reducedWeight * quantity;
 
     if (currentWeight + addedWeight > containerMaxWeight) {
-        // Используем обновленный ключ локализации
         ui.notifications.warn(game.i18n.format("WEIGHTY_CONTAINERS.Notifications.CapacityExceeded", { containerName: containerItem.name }));
         return false; // Отменить создание
     }
 
-    // Если создание разрешено и есть редукция, модифицируем данные ПЕРЕД созданием
-    if (reductionPercent > 0) {
-        data.system.weight = itemWeight; // Устанавливаем сниженный вес
-        // Добавляем флаг в данные для создания
-        if (!data.flags) data.flags = {};
-        if (!data.flags[MODULE_ID]) data.flags[MODULE_ID] = {};
-        data.flags[MODULE_ID][FLAG_ORIGINAL_WEIGHT] = originalWeight;
+    // Модифицируем данные ПЕРЕД созданием
+    if (reductionPercent > 0 && itemBaseWeight > 0) {
+        data.system.weight = reducedWeight; // Устанавливаем сниженный вес
+        foundry.utils.setProperty(data, `flags.${MODULE_ID}.${FLAG_ORIGINAL_WEIGHT}`, itemBaseWeight);
     }
 
-    return true; // Разрешить создание
+    return true;
 }
 
 /**
  * Fallback: Проверка вместимости перед обновлением (изменение количества).
- * @param {Item} item - Документ обновляемого предмета.
- * @param {object} changes - Изменения.
- * @param {object} options - Опции.
- * @param {string} userId - ID пользователя.
- * @returns {boolean} Возвращает false, чтобы отменить обновление.
  */
 function onItemPreUpdate(item, changes, options, userId) {
-    // Пропускаем, если это внутреннее обновление или не от текущего юзера
-    if (game.userId !== userId || options?.WEIGHTY_CONTAINERS_INTERNAL) return true;
+    if (game.userId !== userId || options?.[INTERNAL_UPDATE_FLAG]) return true;
 
     const actor = item.actor;
     const quantityChange = changes.system?.quantity;
-    const container = item.system?.container;
+    const isQuantityIncrease = typeof quantityChange === 'number' && quantityChange > item.system.quantity;
+    const containerId = item.system?.container?.id;
 
-    // Пропускаем, если не меняется кол-во, нет актора/контейнера, или кол-во уменьшается
-    if (!actor || typeof quantityChange !== 'number' || !container || quantityChange <= item.system.quantity) {
+    if (!actor || !isQuantityIncrease || !containerId) {
         return true;
     }
 
-    const containerItem = actor.items.get(container.id);
+    const containerItem = actor.items.get(containerId);
      if (!containerItem || containerItem.system?.capacity?.type !== 'weight') {
-        return true; // Не тот контейнер
+        return true;
     }
 
      const containerMaxWeight = containerItem.system.capacity.value ?? 0;
-     // Используем текущий (сниженный) вес и текущее кол-во
      const currentWeightWithoutItem = calculateContainerContentsWeight(containerItem, actor) - (item.system.weight * item.system.quantity);
-     // Используем текущий (сниженный) вес и новое кол-во
      const newItemTotalWeight = item.system.weight * quantityChange;
 
     if (currentWeightWithoutItem + newItemTotalWeight > containerMaxWeight) {
-        // Используем обновленный ключ локализации
         ui.notifications.warn(game.i18n.format("WEIGHTY_CONTAINERS.Notifications.CapacityExceeded", { containerName: containerItem.name }));
         // Отменяем ТОЛЬКО изменение количества
         delete changes.system.quantity;
-        if (Object.keys(changes.system).length === 0) delete changes.system;
-        // Если больше нет изменений, полностью отменяем обновление
-        if (Object.keys(changes).length === 0) return false;
-        // Иначе позволяем другим изменениям пройти
-        return true;
+        if (foundry.utils.isEmpty(changes.system)) delete changes.system;
+        if (foundry.utils.isEmpty(changes)) return false; // Полностью отменяем, если не осталось изменений
+        return true; // Иначе позволяем другим изменениям пройти
     }
 
-    return true; // Разрешить обновление
+    return true;
 }
 
 /**
  * Fallback: Обработка изменений после обновления предмета (смена контейнера или веса).
- * @param {Item} item - Обновленный предмет.
- * @param {object} changes - Примененные изменения (содержат старые значения для некоторых полей).
- * @param {object} options - Опции.
- * @param {string} userId - ID пользователя.
+ * Этот хук менее надежен, чем libWrapper, особенно для внешних изменений веса.
  */
 async function onItemUpdate(item, changes, options, userId) {
-     // Игнорировать внутренние обновления и чужие действия
-     if (game.userId !== userId || options?.WEIGHTY_CONTAINERS_INTERNAL ) return;
+     if (game.userId !== userId || options?.[INTERNAL_UPDATE_FLAG] ) return;
 
     const actor = item.actor;
-    if (!actor) return; // Нужен актор для работы с контейнерами
+    if (!actor) return;
 
-    const internalContext = { WEIGHTY_CONTAINERS_INTERNAL: true };
+    const internalContext = { [INTERNAL_UPDATE_FLAG]: true };
+    const newContainerId = item.system.container?.id;
+    const newContainer = newContainerId ? actor.items.get(newContainerId) : null;
+    const isInReducingContainer = newContainer && getReductionPercent(newContainer) > 0;
+    const hadOriginalWeightFlag = getOriginalWeight(item) !== null; // Проверяем флаг на уже обновленном item
 
     // 1. Проверка смены контейнера
      if (changes.system && 'container' in changes.system) {
-        // 'changes.system.container' содержит ID *предыдущего* контейнера (или null)
-        // 'item.system.container' содержит ID *нового* контейнера (или null)
-        const previousContainerId = changes.system.container;
-        const newContainerId = item.system.container?.id;
+        const previousContainerId = changes.system.container; // ID старого контейнера
 
         if (previousContainerId !== newContainerId) {
              const previousContainer = previousContainerId ? actor.items.get(previousContainerId) : null;
-             const newContainer = newContainerId ? actor.items.get(newContainerId) : null;
+             const wasInReducingContainer = previousContainer && getReductionPercent(previousContainer) > 0;
 
-             const hadReduction = previousContainer && getReductionPercent(previousContainer) > 0;
-             const hasReduction = newContainer && getReductionPercent(newContainer) > 0;
-
-             if (hadReduction && !hasReduction) {
-                 await restoreOriginalWeight(item); // Восстанавливаем вес
-             } else if (!hadReduction && hasReduction) {
-                 await applyWeightReduction(item, newContainer); // Применяем редукцию
-             } else if (hadReduction && hasReduction) {
+             if (wasInReducingContainer && !isInReducingContainer) {
+                 await restoreOriginalWeight(item, internalContext);
+             } else if (!wasInReducingContainer && isInReducingContainer) {
+                 await applyWeightReduction(item, newContainer, internalContext);
+             } else if (wasInReducingContainer && isInReducingContainer) {
                  // Пересчитываем редукцию
-                 const originalWeight = getOriginalWeight(item) ?? item.system.weight;
-                 await item.unsetFlag(MODULE_ID, FLAG_ORIGINAL_WEIGHT);
-                 // Обновляем до оригинального веса перед применением новой редукции
-                 if (Math.abs(item.system.weight - originalWeight) > 0.001) {
-                     await item.update({'system.weight': originalWeight}, internalContext);
-                 }
-                 await applyWeightReduction(item, newContainer);
+                 await applyWeightReduction(item, newContainer, internalContext);
              }
         }
      }
-    // 2. Проверка изменения веса предмета извне, когда он в контейнере с редукцией
-    else if (changes.system && 'weight' in changes.system && item.system.container) {
-        const container = actor.items.get(item.system.container.id);
-        // Если контейнер с редукцией И изменение веса пришло не от нашего модуля
-        if (container && getReductionPercent(container) > 0) {
-            // 'changes.system.weight' - это старый вес до обновления
-            // 'item.system.weight' - это новый вес после обновления
-            const newOriginalWeight = item.system.weight; // Считаем, что внешний источник обновил до нового ОРИГИНАЛЬНОГО веса
+    // 2. Проверка изменения веса (менее надежно без libWrapper)
+    // Мы не можем точно знать, было ли это внешнее изменение или наше собственное
+    // Просто проверяем консистентность: если в редукции, вес должен быть снижен, иначе - оригинальным
+    else if (changes.system && 'weight' in changes.system) {
+        if (isInReducingContainer) {
+            // Если вес изменился и он не равен ожидаемому редуцированному весу -> пересчитать
+            const originalWeight = getOriginalWeight(item) ?? item.system.weight; // Берем из флага или новый вес как базу
+            const reductionFactor = 1 - (getReductionPercent(newContainer) / 100);
+            const expectedReducedWeight = Math.max(0, originalWeight * reductionFactor);
 
-            // Сохраняем новый оригинальный вес во флаг
-            await item.setFlag(MODULE_ID, FLAG_ORIGINAL_WEIGHT, newOriginalWeight);
-            // Пересчитываем и применяем редуцированный вес
-            const reductionFactor = 1 - (getReductionPercent(container) / 100);
-            const newReducedWeight = Math.max(0, newOriginalWeight * reductionFactor);
-            // Обновляем вес предмета на редуцированный, если он отличается
-            if (Math.abs(item.system.weight - newReducedWeight) > 0.001) {
-                 await item.update({'system.weight': newReducedWeight}, internalContext);
+            if (Math.abs(item.system.weight - expectedReducedWeight) > 0.001) {
+                 console.warn(`${MODULE_ID} | Fallback: Weight inconsistency detected for ${item.name}. Re-applying reduction.`);
+                 // Установим флаг на всякий случай
+                 await item.setFlag(MODULE_ID, FLAG_ORIGINAL_WEIGHT, originalWeight);
+                 await item.update({'system.weight': expectedReducedWeight}, internalContext);
             }
+        } else {
+             // Если не в редукции, но флаг есть -> восстановить
+             if (hadOriginalWeightFlag) {
+                 await restoreOriginalWeight(item, internalContext);
+             }
         }
     }
+     // 3. Проверка консистентности флага вне смены контейнера/веса
+     else {
+         if (!isInReducingContainer && hadOriginalWeightFlag) {
+             await restoreOriginalWeight(item, internalContext);
+         }
+         // Случай isInReducingContainer без флага сложнее обработать в fallback
+     }
 }
 
-// Хук готовности - проверяем предметы при загрузке (опционально, но полезно)
+// Хук готовности - проверяем предметы при загрузке
 Hooks.on('ready', async () => {
     console.log(`${MODULE_ID} | Ready. Checking item weights inside containers.`);
-    // Пройдем по всем акторам игроков и их токенам на активных сценах
     const actorsToCheck = new Set();
-    game.users.filter(u => u.character).forEach(u => actorsToCheck.add(u.character));
+    game.users.filter(u => u.character && u.active).forEach(u => actorsToCheck.add(u.character));
     game.scenes.filter(s => s.active).flatMap(s => s.tokens).filter(t => t.actor).forEach(t => actorsToCheck.add(t.actor));
 
     for (const actor of actorsToCheck) {
+        if (!actor.items) continue; // Пропускаем, если у актора нет предметов (например, неинициализированный)
         const updates = [];
-        const itemsToProcess = actor.items.contents; // Копируем массив для безопасной итерации
+        const itemsToProcess = actor.items.contents;
+        const internalContext = { [INTERNAL_UPDATE_FLAG]: true };
 
         for (const item of itemsToProcess) {
             const containerId = item.system.container?.id;
+            const originalWeight = getOriginalWeight(item); // null or number
+
             if (!containerId) {
-                // Если предмет НЕ в контейнере, но имеет флаг -> восстановить вес
-                if (getOriginalWeight(item) !== null) {
-                    await restoreOriginalWeight(item); // Делает update сам
+                // НЕ в контейнере, но флаг есть -> восстановить
+                if (originalWeight !== null) {
+                    console.log(`${MODULE_ID} | Ready Check: Restoring weight for ${item.name} (not in container but has flag).`);
+                    await restoreOriginalWeight(item, internalContext); // Делает update сам
                 }
                 continue;
             }
 
             const container = actor.items.get(containerId);
             if (!container || container.system?.capacity?.type !== 'weight') {
-                 // Если контейнер невалидный, но есть флаг -> восстановить вес
-                 if (getOriginalWeight(item) !== null) {
-                     await restoreOriginalWeight(item);
+                 // В невалидном контейнере, но флаг есть -> восстановить
+                 if (originalWeight !== null) {
+                    console.log(`${MODULE_ID} | Ready Check: Restoring weight for ${item.name} (invalid container but has flag).`);
+                     await restoreOriginalWeight(item, internalContext);
                  }
                  continue;
             }
 
+            // В валидном контейнере с весовым лимитом
             const reductionPercent = getReductionPercent(container);
-            const originalWeight = getOriginalWeight(item);
 
             if (reductionPercent > 0) {
-                // Контейнер с редукцией
+                // Контейнер С редукцией
                 const baseWeight = originalWeight ?? item.system.weight; // Берем из флага или текущий
+                if (baseWeight === 0) { // Не обрабатываем предметы с нулевым весом, кроме установки флага
+                     if(originalWeight === null) await item.setFlag(MODULE_ID, FLAG_ORIGINAL_WEIGHT, 0);
+                    continue;
+                }
+
                 const reductionFactor = 1 - (reductionPercent / 100);
                 const expectedReducedWeight = Math.max(0, baseWeight * reductionFactor);
 
-                let needsUpdate = false;
-                let weightUpdate = {};
+                let needsFlagUpdate = false;
+                let needsWeightUpdate = false;
 
-                // Обновляем флаг, если его не было или он неверен
+                // Проверяем флаг
                 if (originalWeight === null || Math.abs(originalWeight - baseWeight) > 0.001) {
-                     await item.setFlag(MODULE_ID, FLAG_ORIGINAL_WEIGHT, baseWeight); // Устанавливаем флаг отдельно
+                    needsFlagUpdate = true;
                 }
-
-                // Обновляем вес, если он не соответствует ожидаемому
+                // Проверяем вес
                 if (Math.abs(item.system.weight - expectedReducedWeight) > 0.001) {
-                    weightUpdate = { 'system.weight': expectedReducedWeight };
-                    needsUpdate = true;
+                    needsWeightUpdate = true;
                 }
 
-                if (needsUpdate) {
-                    updates.push({ _id: item.id, ...weightUpdate });
+                // Применяем обновления, если нужны
+                if (needsFlagUpdate) {
+                    await item.setFlag(MODULE_ID, FLAG_ORIGINAL_WEIGHT, baseWeight);
+                }
+                if (needsWeightUpdate) {
+                     console.log(`${MODULE_ID} | Ready Check: Correcting weight for ${item.name} in container ${container.name}. Expected: ${expectedReducedWeight}, Actual: ${item.system.weight}`);
+                    updates.push({ _id: item.id, 'system.weight': expectedReducedWeight });
                 }
 
             } else {
                 // Контейнер БЕЗ редукции
                 // Если есть флаг -> восстановить вес
                 if (originalWeight !== null) {
-                    // Не добавляем в updates, т.к. restoreOriginalWeight сам обновляет
-                    await restoreOriginalWeight(item);
+                    console.log(`${MODULE_ID} | Ready Check: Restoring weight for ${item.name} (container has no reduction but flag exists).`);
+                    await restoreOriginalWeight(item, internalContext);
                 }
             }
         } // конец цикла по предметам актора
 
         if (updates.length > 0) {
             console.log(`${MODULE_ID} | Applying ${updates.length} weight corrections for actor ${actor.name}`);
-            await actor.updateEmbeddedDocuments("Item", updates, { WEIGHTY_CONTAINERS_INTERNAL: true });
+            await actor.updateEmbeddedDocuments("Item", updates, internalContext);
         }
     } // конец цикла по акторам
      console.log(`${MODULE_ID} | Initial weight check complete.`);
