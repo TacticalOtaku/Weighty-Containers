@@ -34,14 +34,29 @@ function getWeightReductionPercent(containerItem) {
 }
 
 /**
- * Вычисляет эффективный вес предмета, учитывая снижение веса в контейнере.
+ * Вычисляет эффективный вес предмета, учитывая снижение веса в контейнере и эффекты DAE.
  * @param {Item | null | undefined} item - Предмет для проверки.
  * @param {Actor | null | undefined} [actor=item?.actor] - Актер, которому принадлежит предмет.
  * @returns {number} Эффективный вес предмета.
  */
 function getEffectiveItemWeight(item, actor = item?.actor) {
-    const weightSource = foundry.utils.getProperty(item, "system.weight");
+    let weightSource = foundry.utils.getProperty(item, "system.weight");
     let baseWeight = 0;
+
+    // NEW: Учет эффектов DAE, изменяющих вес предмета
+    if (game.modules.get('dae')?.active && item?.effects) {
+        const weightEffects = item.effects.filter(e => e.changes.some(c => c.key.includes('system.weight')));
+        if (weightEffects.length) {
+            weightEffects.forEach(effect => {
+                effect.changes.forEach(change => {
+                    if (change.key.includes('system.weight')) {
+                        weightSource = Number(change.value) || weightSource;
+                    }
+                });
+            });
+        }
+    }
+
     if (typeof weightSource === 'number' && !isNaN(weightSource)) {
         baseWeight = weightSource;
     } else if (typeof weightSource === 'string') {
@@ -72,7 +87,7 @@ function getEffectiveItemWeight(item, actor = item?.actor) {
 }
 
 /**
- * Вычисляет общий текущий вес przedmiotов внутри контейнера.
+ * Вычисляет общий текущий вес предметов внутри контейнера.
  * @param {Item | null | undefined} containerItem - Документ предмета-контейнера.
  * @param {Actor | null | undefined} actor - Актер, которому принадлежит контейнер.
  * @returns {number} Суммарный эффективный вес содержимого.
@@ -113,7 +128,6 @@ function getRarityClassForReduction(reductionPercent) {
     return 'rarity-common';
 }
 
-// NEW: Вспомогательная функция для обновления прогресс-бара контейнера
 /**
  * Обновляет прогресс-бар контейнера в указанном DOM-элементе.
  * @param {jQuery} html - jQuery-объект DOM.
@@ -130,15 +144,24 @@ function updateContainerProgressBar(html, containerItem, actor, options = {}) {
     const containerMaxWeight = Number(foundry.utils.getProperty(containerItem, "system.capacity.weight.value") ?? 0);
     if (containerMaxWeight <= 0) return;
 
+    // MODIFIED: Расширен список селекторов для поддержки Tidy 5e Sheets и других кастомных листов
     const progressSelectors = options.progressSelectors || [
         '.encumbrance .meter.progress',
-        '.progress-bar.encumbrance', // Альтернативный селектор для других листов
-        '.container-capacity-bar'   // Для кастомных интерфейсов
+        '.progress-bar.encumbrance',
+        '.container-capacity-bar',
+        '.tidy5e-sheet .encumbrance-bar', // Tidy 5e Sheets
+        '.tidy5e .progress-bar',          // Tidy 5e Sheets альтернативный
+        '.item-piles-progress',           // Item Piles
+        '.minimal-ui .encumbrance-bar'    // Minimal UI
     ];
     const valueSelectors = options.valueSelectors || [
         '.encumbrance .meter .label .value',
-        '.encumbrance-value', // Альтернативный селектор
-        '.container-weight-value' // Для кастомных интерфейсов
+        '.encumbrance-value',
+        '.container-weight-value',
+        '.tidy5e-sheet .encumbrance-value', // Tidy 5e Sheets
+        '.tidy5e .weight-value',           // Tidy 5e Sheets альтернативный
+        '.item-piles-weight',              // Item Piles
+        '.minimal-ui .weight-value'        // Minimal UI
     ];
 
     progressSelectors.forEach(selector => {
@@ -219,15 +242,24 @@ function modifyEncumbranceData(actor) {
         let countItemWeight = false;
         const containerId = foundry.utils.getProperty(item, "system.container");
         let isWeightyContainerItem = false;
+
+        // MODIFIED: Учет слотов экипировки от Deyzeria's Equipment Slots
+        const isEquipped = foundry.utils.getProperty(item, "system.equipped") ?? false;
+        const equipmentSlot = foundry.utils.getProperty(item, "system.slot"); // Поддержка Deyzeria's Equipment Slots
         if (containerId) {
              const container = actor.items.get(containerId);
              if (container && isActualWeightContainer(container)) {
-                 isWeightyContainerItem = true; countItemWeight = true;
-             } else if (foundry.utils.getProperty(item, "system.equipped") ?? false) {
+                 isWeightyContainerItem = true;
+                 countItemWeight = true;
+             } else if (isEquipped || equipmentSlot) {
                   countItemWeight = true;
              }
-        } else { countItemWeight = true; }
-        if (foundry.utils.getProperty(item, "system.weightless")) { countItemWeight = false; }
+        } else {
+            countItemWeight = true;
+        }
+        if (foundry.utils.getProperty(item, "system.weightless")) {
+            countItemWeight = false;
+        }
 
         if (countItemWeight) {
              const quantity = Number(foundry.utils.getProperty(item, "system.quantity")) || 1;
@@ -245,9 +277,17 @@ function modifyEncumbranceData(actor) {
         }
     }
 
-    // MODIFIED: Добавляем вес валюты
+    // Учет веса валюты, включая Item Piles
+    let currencyWeight = 0;
     const currency = foundry.utils.getProperty(actor, "system.currency") || {};
-    const currencyWeight = Object.values(currency).reduce((total, amount) => total + (Number(amount) || 0), 0) / 50; // 50 монет = 1 фунт
+    currencyWeight = Object.values(currency).reduce((total, amount) => total + (Number(amount) || 0), 0) / 50; // 50 монет = 1 фунт
+
+    // NEW: Поддержка Item Piles для дополнительных источников валюты
+    if (game.modules.get('item-piles')?.active) {
+        const pileCurrency = foundry.utils.getProperty(actor, "system.itemPilesCurrency") || {};
+        currencyWeight += Object.values(pileCurrency).reduce((total, amount) => total + (Number(amount) || 0), 0) / 50;
+    }
+
     const metricMultiplier = game.settings.get("dnd5e", "metricWeightUnits") ? (game.settings.get("dnd5e", "metricWeightMultiplier") ?? 1) : 1;
     effectiveTotalWeight += currencyWeight * metricMultiplier;
 
@@ -326,9 +366,14 @@ Hooks.once('ready', () => {
     console.log(`${MODULE_ID} | Module Ready`);
 });
 
-// NEW: Хук для обновления веса при изменении валюты
+// Хук для обновления веса при изменении валюты
 Hooks.on('updateActor', (actor, change, options, userId) => {
     if (foundry.utils.hasProperty(change, 'system.currency') && actor.sheet?.rendered) {
+        modifyEncumbranceData(actor);
+        try { actor.sheet.render(false); } catch (e) { /* ignore */ }
+    }
+    // NEW: Поддержка Item Piles для обновления при изменении itemPilesCurrency
+    if (game.modules.get('item-piles')?.active && foundry.utils.hasProperty(change, 'system.itemPilesCurrency') && actor.sheet?.rendered) {
         modifyEncumbranceData(actor);
         try { actor.sheet.render(false); } catch (e) { /* ignore */ }
     }
@@ -352,7 +397,7 @@ Hooks.on('renderItemSheet', (app, html, data) => {
     const reductionPercent = getWeightReductionPercent(item);
     const canConfigure = game.user?.isGM || !game.settings.get(MODULE_ID, 'gmOnlyConfig');
     const rarityClass = getRarityClassForReduction(reductionPercent);
-    const uiWrapper = $('<div class="weighty-container-ui-wrapper" style="display: flex; align-items: center; gap: 5px; margin-top EconomyContextMenu: 3px;"></div>');
+    const uiWrapper = $('<div class="weighty-container-ui-wrapper" style="display: flex; align-items: center; gap: 5px; margin-top: 3px;"></div>');
 
     const reductionDisplayHTML = `
       <div class="weighty-container-reduction-display ${rarityClass}" title="${game.i18n.localize('WEIGHTYCONTAINERS.WeightReductionLabel')}">
@@ -409,19 +454,25 @@ Hooks.on('renderItemSheet', (app, html, data) => {
 
     try { if (app.rendered) app.setPosition({ height: "auto" }); } catch (e) { /* Игнорируем */ }
 
-    // MODIFIED: Обновление прогресс-бара с использованием новой функции
+    // Обновление прогресс-бара
     if (isWeightContainer && app.actor) {
         try {
             updateContainerProgressBar(html, item, app.actor, {
                 progressSelectors: [
                     '.tab.contents[data-tab="contents"] .encumbrance .meter.progress',
                     '.tab.contents .progress-bar.encumbrance',
-                    '.container-capacity-bar'
+                    '.container-capacity-bar',
+                    '.tidy5e-sheet .encumbrance-bar', // Tidy 5e Sheets
+                    '.tidy5e .progress-bar',          // Tidy 5e Sheets альтернативный
+                    '.item-piles-progress'            // Item Piles
                 ],
                 valueSelectors: [
                     '.tab.contents[data-tab="contents"] .encumbrance .meter .label .value',
                     '.tab.contents .encumbrance-value',
-                    '.container-weight-value'
+                    '.container-weight-value',
+                    '.tidy5e-sheet .encumbrance-value', // Tidy 5e Sheets
+                    '.tidy5e .weight-value',           // Tidy 5e Sheets альтернативный
+                    '.item-piles-weight'               // Item Piles
                 ]
             });
         } catch (e) {
@@ -625,11 +676,24 @@ Hooks.on('renderActorSheet', (app, html, data) => {
             }
         }
 
-        // NEW: Обновляем прогресс-бар для контейнеров в инвентаре актора
+        // Обновляем прогресс-бар для контейнеров в инвентаре актора
         if (item.type === 'container' && isActualWeightContainer(item)) {
             updateContainerProgressBar($(element), item, actor, {
-                progressSelectors: ['.container-progress', '.progress-bar', '.encumbrance-bar'],
-                valueSelectors: ['.container-weight', '.weight-value']
+                progressSelectors: [
+                    '.container-progress',
+                    '.progress-bar',
+                    '.encumbrance-bar',
+                    '.tidy5e-sheet .encumbrance-bar', // Tidy 5e Sheets
+                    '.tidy5e .progress-bar',          // Tidy 5e Sheets альтернативный
+                    '.item-piles-progress'            // Item Piles
+                ],
+                valueSelectors: [
+                    '.container-weight',
+                    '.weight-value',
+                    '.tidy5e-sheet .encumbrance-value', // Tidy 5e Sheets
+                    '.tidy5e .weight-value',           // Tidy 5e Sheets альтернативный
+                    '.item-piles-weight'               // Item Piles
+                ]
             });
         }
     });
