@@ -1,5 +1,3 @@
-// weighty-containers/main.js
-
 const MODULE_ID = 'weighty-containers';
 const FLAG_WEIGHT_REDUCTION = 'weightReduction';
 let libWrapper; // Переменная для libWrapper
@@ -74,7 +72,7 @@ function getEffectiveItemWeight(item, actor = item?.actor) {
 }
 
 /**
- * Вычисляет общий текущий вес предметов внутри контейнера.
+ * Вычисляет общий текущий вес przedmiotов внутри контейнера.
  * @param {Item | null | undefined} containerItem - Документ предмета-контейнера.
  * @param {Actor | null | undefined} actor - Актер, которому принадлежит контейнер.
  * @returns {number} Суммарный эффективный вес содержимого.
@@ -113,6 +111,51 @@ function getRarityClassForReduction(reductionPercent) {
     if (reductionPercent >= 25) return 'rarity-rare';
     if (reductionPercent > 0) return 'rarity-uncommon';
     return 'rarity-common';
+}
+
+// NEW: Вспомогательная функция для обновления прогресс-бара контейнера
+/**
+ * Обновляет прогресс-бар контейнера в указанном DOM-элементе.
+ * @param {jQuery} html - jQuery-объект DOM.
+ * @param {Item} containerItem - Контейнер.
+ * @param {Actor} actor - Актер.
+ * @param {Object} [options] - Опции.
+ * @param {string[]} [options.progressSelectors] - Селекторы для прогресс-бара.
+ * @param {string[]} [options.valueSelectors] - Селекторы для значения веса.
+ */
+function updateContainerProgressBar(html, containerItem, actor, options = {}) {
+    if (!isActualWeightContainer(containerItem) || !actor) return;
+
+    const effectiveCurrentWeight = calculateCurrentContainerWeight(containerItem, actor);
+    const containerMaxWeight = Number(foundry.utils.getProperty(containerItem, "system.capacity.weight.value") ?? 0);
+    if (containerMaxWeight <= 0) return;
+
+    const progressSelectors = options.progressSelectors || [
+        '.encumbrance .meter.progress',
+        '.progress-bar.encumbrance', // Альтернативный селектор для других листов
+        '.container-capacity-bar'   // Для кастомных интерфейсов
+    ];
+    const valueSelectors = options.valueSelectors || [
+        '.encumbrance .meter .label .value',
+        '.encumbrance-value', // Альтернативный селектор
+        '.container-weight-value' // Для кастомных интерфейсов
+    ];
+
+    progressSelectors.forEach(selector => {
+        const meterElement = html.find(selector);
+        if (meterElement.length > 0) {
+            const percentage = Math.min(100, Math.round((effectiveCurrentWeight / containerMaxWeight) * 100));
+            meterElement.css('--bar-percentage', `${percentage}%`);
+            meterElement.attr('aria-valuenow', effectiveCurrentWeight.toFixed(2));
+        }
+    });
+
+    valueSelectors.forEach(selector => {
+        const valueElement = html.find(selector);
+        if (valueElement.length > 0) {
+            valueElement.text(Math.round(effectiveCurrentWeight * 100) / 100);
+        }
+    });
 }
 
 // --- Hooks ---
@@ -202,6 +245,12 @@ function modifyEncumbranceData(actor) {
         }
     }
 
+    // MODIFIED: Добавляем вес валюты
+    const currency = foundry.utils.getProperty(actor, "system.currency") || {};
+    const currencyWeight = Object.values(currency).reduce((total, amount) => total + (Number(amount) || 0), 0) / 50; // 50 монет = 1 фунт
+    const metricMultiplier = game.settings.get("dnd5e", "metricWeightUnits") ? (game.settings.get("dnd5e", "metricWeightMultiplier") ?? 1) : 1;
+    effectiveTotalWeight += currencyWeight * metricMultiplier;
+
     const finalEffectiveWeight = Number(effectiveTotalWeight.toPrecision(5));
     actor.system.attributes.encumbrance.value = finalEffectiveWeight;
 
@@ -217,9 +266,7 @@ function modifyEncumbranceData(actor) {
             thresholdsConfig = CONFIG.DND5E.encumbrance.threshold[actor.type] ?? CONFIG.DND5E.encumbrance.threshold.default;
         }
 
-        // Если конфиг НЕ НАЙДЕН, используем запасные значения без предупреждения
         if (!thresholdsConfig) {
-            // console.warn(`${MODULE_ID} | Threshold config not found for actor type '${actor.type}'. Using fallback ratios (1/3, 2/3, 1) for encumbrance levels.`); // Убрано предупреждение
             thresholdsConfig = { light: 1/3, medium: 2/3, heavy: 1 };
         }
 
@@ -236,10 +283,8 @@ function modifyEncumbranceData(actor) {
     } else if (enc.units === "%") {
          enc.thresholds = { light: 0, medium: 0, heavy: 0, maximum: 100 };
     } else {
-         // Предупреждение оставлено только если baseMax некорректен
          console.warn(`${MODULE_ID} | Could not calculate encumbrance levels for ${actor.name}: Invalid baseMax value (baseMax=${enc.max}, typeof baseMax=${typeof enc.max}). Defaulting statuses to false.`);
     }
-    // --- КОНЕЦ блока пересчета уровней v2 ---
 }
 
 /**
@@ -281,8 +326,13 @@ Hooks.once('ready', () => {
     console.log(`${MODULE_ID} | Module Ready`);
 });
 
-// --- КОНЕЦ ПАТЧИНГА ---
-
+// NEW: Хук для обновления веса при изменении валюты
+Hooks.on('updateActor', (actor, change, options, userId) => {
+    if (foundry.utils.hasProperty(change, 'system.currency') && actor.sheet?.rendered) {
+        modifyEncumbranceData(actor);
+        try { actor.sheet.render(false); } catch (e) { /* ignore */ }
+    }
+});
 
 /**
  * Добавляем UI элементы на лист контейнера.
@@ -302,7 +352,7 @@ Hooks.on('renderItemSheet', (app, html, data) => {
     const reductionPercent = getWeightReductionPercent(item);
     const canConfigure = game.user?.isGM || !game.settings.get(MODULE_ID, 'gmOnlyConfig');
     const rarityClass = getRarityClassForReduction(reductionPercent);
-    const uiWrapper = $('<div class="weighty-container-ui-wrapper" style="display: flex; align-items: center; gap: 5px; margin-top: 3px;"></div>');
+    const uiWrapper = $('<div class="weighty-container-ui-wrapper" style="display: flex; align-items: center; gap: 5px; margin-top EconomyContextMenu: 3px;"></div>');
 
     const reductionDisplayHTML = `
       <div class="weighty-container-reduction-display ${rarityClass}" title="${game.i18n.localize('WEIGHTYCONTAINERS.WeightReductionLabel')}">
@@ -359,29 +409,22 @@ Hooks.on('renderItemSheet', (app, html, data) => {
 
     try { if (app.rendered) app.setPosition({ height: "auto" }); } catch (e) { /* Игнорируем */ }
 
-    // --- Обновление отображаемого веса содержимого на листе контейнера ---
+    // MODIFIED: Обновление прогресс-бара с использованием новой функции
     if (isWeightContainer && app.actor) {
         try {
-            const actor = app.actor;
-            const containerItem = item;
-            const effectiveCurrentWeight = calculateCurrentContainerWeight(containerItem, actor);
-            const containerMaxWeight = Number(foundry.utils.getProperty(containerItem, "system.capacity.weight.value") ?? 0);
-
-            const contentsTab = html.find('.tab.contents[data-tab="contents"]');
-            if (contentsTab.length > 0) {
-                const valueElement = contentsTab.find('.encumbrance .meter .label .value');
-                const meterElement = contentsTab.find('.encumbrance .meter.progress');
-
-                if (valueElement.length > 0) {
-                    valueElement.text(Math.round(effectiveCurrentWeight * 100) / 100);
-                }
-                if (meterElement.length > 0 && containerMaxWeight > 0) {
-                    const percentage = Math.min(100, Math.round((effectiveCurrentWeight / containerMaxWeight) * 100));
-                    meterElement.css('--bar-percentage', `${percentage}%`);
-                    meterElement.attr('aria-valuenow', effectiveCurrentWeight.toFixed(2));
-                }
-            }
-        } catch(e) {
+            updateContainerProgressBar(html, item, app.actor, {
+                progressSelectors: [
+                    '.tab.contents[data-tab="contents"] .encumbrance .meter.progress',
+                    '.tab.contents .progress-bar.encumbrance',
+                    '.container-capacity-bar'
+                ],
+                valueSelectors: [
+                    '.tab.contents[data-tab="contents"] .encumbrance .meter .label .value',
+                    '.tab.contents .encumbrance-value',
+                    '.container-weight-value'
+                ]
+            });
+        } catch (e) {
             console.error(`${MODULE_ID} | Error updating container sheet weight display:`, e);
         }
     }
@@ -427,7 +470,6 @@ Hooks.on('preCreateItem', (itemDoc, createData, options, userId) => {
 
     const potentialTotalWeight = currentWeight + effectiveWeightToAdd;
     const tolerance = 0.001;
-    // console.log(`${MODULE_ID} | DEBUG: preCreateItem: Current: ${currentWeight.toFixed(5)}, Adding: ${effectiveWeightToAdd.toFixed(5)}, Potential: ${potentialTotalWeight.toFixed(5)}, Max: ${containerMaxWeight}`);
 
     if (potentialTotalWeight > containerMaxWeight + tolerance) {
         const customMessage = game.settings.get(MODULE_ID, 'capacityExceededMessage') || "Container capacity exceeded.";
@@ -436,7 +478,6 @@ Hooks.on('preCreateItem', (itemDoc, createData, options, userId) => {
         return false;
     }
 
-    // console.log(`${MODULE_ID} | ALLOWED preCreateItem: Within limit.`);
     return true;
 });
 
@@ -526,7 +567,6 @@ Hooks.on('preUpdateItem', (itemDoc, change, options, userId) => {
     }
 
     const tolerance = 0.001;
-    // console.log(`${MODULE_ID} | DEBUG: preUpdateItem: Current: ${currentWeightInTargetContainer.toFixed(5)}, Future: ${futureWeightInTargetContainer.toFixed(5)}, Max: ${containerMaxWeight}. Reason: ${logReason}`);
 
     if (futureWeightInTargetContainer > containerMaxWeight + tolerance) {
         const customMessage = game.settings.get(MODULE_ID, 'capacityExceededMessage') || "Container capacity exceeded.";
@@ -535,13 +575,11 @@ Hooks.on('preUpdateItem', (itemDoc, change, options, userId) => {
         return false;
     }
 
-    // console.log(`${MODULE_ID} | ALLOWED preUpdateItem: Within limit.`);
     return true;
 });
 
-
 /**
- * Добавляем отображение эффективного веса на листе актора
+ * Добавляем отображение эффективного веса и прогресс-бара на листе актора
  */
 Hooks.on('renderActorSheet', (app, html, data) => {
     if (!(app instanceof ActorSheet) || !app.actor || ['npc', 'vehicle'].includes(app.actor.type)) return;
@@ -585,6 +623,14 @@ Hooks.on('renderActorSheet', (app, html, data) => {
             } else {
                weightCell.append(`<span class="weighty-effective-weight">${effectiveWeightText}</span>`);
             }
+        }
+
+        // NEW: Обновляем прогресс-бар для контейнеров в инвентаре актора
+        if (item.type === 'container' && isActualWeightContainer(item)) {
+            updateContainerProgressBar($(element), item, actor, {
+                progressSelectors: ['.container-progress', '.progress-bar', '.encumbrance-bar'],
+                valueSelectors: ['.container-weight', '.weight-value']
+            });
         }
     });
 });
