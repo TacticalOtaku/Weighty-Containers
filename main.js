@@ -11,9 +11,9 @@ let libWrapper; // Переменная для libWrapper
  */
 function isActualWeightContainer(item) {
     if (!item || item.type !== 'container' || !item.system) return false;
-    const hasWeightValue = typeof item.system.capacity?.weight?.value === 'number' && item.system.capacity.weight.value >= 0;
+    const hasWeightValue = typeof item.system.capacity?.weight?.value === 'number' && item.system.capacity.weight.value > 0; // MODIFIED: > 0 для исключения нулевых или отрицательных значений
     const typeIsWeight = item.system.capacity?.type === 'weight';
-    return hasWeightValue || typeIsWeight;
+    return hasWeightValue && typeIsWeight;
 }
 
 /**
@@ -30,7 +30,8 @@ function getWeightReductionPercent(containerItem) {
         console.error(`${MODULE_ID} | Error calling getFlag for ${containerItem.name}:`, e);
         flagValue = foundry.utils.getProperty(containerItem, `flags.${MODULE_ID}.${FLAG_WEIGHT_REDUCTION}`);
     }
-    return Number(flagValue) || 0;
+    const reduction = Number(flagValue) || 0;
+    return Math.max(0, Math.min(100, reduction)); // MODIFIED: Ограничение 0-100
 }
 
 /**
@@ -40,10 +41,15 @@ function getWeightReductionPercent(containerItem) {
  * @returns {number} Эффективный вес предмета.
  */
 function getEffectiveItemWeight(item, actor = item?.actor) {
+    if (!item || !item.system || !actor) {
+        console.warn(`${MODULE_ID} | getEffectiveItemWeight: Invalid item or actor. Returning 0.`, { item, actor });
+        return 0;
+    }
+
     let weightSource = foundry.utils.getProperty(item, "system.weight");
     let baseWeight = 0;
 
-    // NEW: Учет эффектов DAE, изменяющих вес предмета
+    // Учет эффектов DAE, изменяющих вес предмета
     if (game.modules.get('dae')?.active && item?.effects) {
         const weightEffects = item.effects.filter(e => e.changes.some(c => c.key.includes('system.weight')));
         if (weightEffects.length) {
@@ -58,29 +64,27 @@ function getEffectiveItemWeight(item, actor = item?.actor) {
     }
 
     if (typeof weightSource === 'number' && !isNaN(weightSource)) {
-        baseWeight = weightSource;
+        baseWeight = Math.max(0, weightSource); // MODIFIED: Не допускать отрицательный вес
     } else if (typeof weightSource === 'string') {
         baseWeight = parseFloat(weightSource) || 0;
     } else if (typeof weightSource === 'object' && weightSource !== null && typeof weightSource.value === 'number') {
-         baseWeight = Number(weightSource.value) || 0;
+        baseWeight = Math.max(0, Number(weightSource.value) || 0);
     } else {
         baseWeight = 0;
     }
 
     const containerId = foundry.utils.getProperty(item, "system.container");
-    if (!actor || !containerId) return baseWeight;
+    if (!containerId) return baseWeight;
 
     const container = actor.items.get(containerId);
     if (!container || !isActualWeightContainer(container)) return baseWeight;
 
     const reductionPercent = getWeightReductionPercent(container);
-    if (reductionPercent <= 0) return baseWeight;
-
     const multiplier = Math.max(0, 1 - reductionPercent / 100);
     const effectiveWeight = baseWeight * multiplier;
 
-    if (isNaN(effectiveWeight)) {
-        console.error(`%c${MODULE_ID} | ERROR getEffectiveItemWeight: Calculation resulted in NaN! Item: ${item?.name}, BaseW: ${baseWeight}, Multiplier: ${multiplier}. Returning 0.`, "color: red; font-weight: bold;");
+    if (isNaN(effectiveWeight) || effectiveWeight < 0) {
+        console.error(`%c${MODULE_ID} | ERROR getEffectiveItemWeight: Invalid calculation! Item: ${item?.name}, BaseW: ${baseWeight}, Multiplier: ${multiplier}. Returning 0.`, "color: red; font-weight: bold;");
         return 0;
     }
     return effectiveWeight;
@@ -93,7 +97,10 @@ function getEffectiveItemWeight(item, actor = item?.actor) {
  * @returns {number} Суммарный эффективный вес содержимого.
  */
 function calculateCurrentContainerWeight(containerItem, actor) {
-    if (!actor || !containerItem || !isActualWeightContainer(containerItem)) return 0;
+    if (!actor || !containerItem || !isActualWeightContainer(containerItem)) {
+        console.warn(`${MODULE_ID} | calculateCurrentContainerWeight: Invalid container or actor. Returning 0.`, { containerItem, actor });
+        return 0;
+    }
 
     let currentWeight = 0;
     if (!actor.items || typeof actor.items.filter !== 'function') {
@@ -103,12 +110,17 @@ function calculateCurrentContainerWeight(containerItem, actor) {
     const contents = actor.items.filter(i => foundry.utils.getProperty(i, "system.container") === containerItem.id);
 
     for (const item of contents) {
-        const quantity = Number(foundry.utils.getProperty(item, "system.quantity")) || 1;
-        currentWeight += getEffectiveItemWeight(item, actor) * quantity;
+        const quantity = Math.max(1, Number(foundry.utils.getProperty(item, "system.quantity")) || 1); // MODIFIED: Гарантировать quantity >= 1
+        const itemWeight = getEffectiveItemWeight(item, actor);
+        if (isNaN(itemWeight)) {
+            console.warn(`${MODULE_ID} | calculateCurrentContainerWeight: Invalid item weight for ${item.name}. Skipping.`);
+            continue;
+        }
+        currentWeight += itemWeight * quantity;
     }
 
-    if (isNaN(currentWeight)) {
-        console.error(`${MODULE_ID} | calculateCurrentContainerWeight: Final sum is NaN for container:`, containerItem.name);
+    if (isNaN(currentWeight) || currentWeight < 0) {
+        console.error(`${MODULE_ID} | calculateCurrentContainerWeight: Invalid sum for container ${containerItem.name}. Returning 0.`, { currentWeight });
         return 0;
     }
     return Number(currentWeight.toPrecision(5));
@@ -144,24 +156,23 @@ function updateContainerProgressBar(html, containerItem, actor, options = {}) {
     const containerMaxWeight = Number(foundry.utils.getProperty(containerItem, "system.capacity.weight.value") ?? 0);
     if (containerMaxWeight <= 0) return;
 
-    // MODIFIED: Расширен список селекторов для поддержки Tidy 5e Sheets и других кастомных листов
     const progressSelectors = options.progressSelectors || [
         '.encumbrance .meter.progress',
         '.progress-bar.encumbrance',
         '.container-capacity-bar',
-        '.tidy5e-sheet .encumbrance-bar', // Tidy 5e Sheets
-        '.tidy5e .progress-bar',          // Tidy 5e Sheets альтернативный
-        '.item-piles-progress',           // Item Piles
-        '.minimal-ui .encumbrance-bar'    // Minimal UI
+        '.tidy5e-sheet .encumbrance-bar',
+        '.tidy5e .progress-bar',
+        '.item-piles-progress',
+        '.minimal-ui .encumbrance-bar'
     ];
     const valueSelectors = options.valueSelectors || [
         '.encumbrance .meter .label .value',
         '.encumbrance-value',
         '.container-weight-value',
-        '.tidy5e-sheet .encumbrance-value', // Tidy 5e Sheets
-        '.tidy5e .weight-value',           // Tidy 5e Sheets альтернативный
-        '.item-piles-weight',              // Item Piles
-        '.minimal-ui .weight-value'        // Minimal UI
+        '.tidy5e-sheet .encumbrance-value',
+        '.tidy5e .weight-value',
+        '.item-piles-weight',
+        '.minimal-ui .weight-value'
     ];
 
     progressSelectors.forEach(selector => {
@@ -243,9 +254,8 @@ function modifyEncumbranceData(actor) {
         const containerId = foundry.utils.getProperty(item, "system.container");
         let isWeightyContainerItem = false;
 
-        // MODIFIED: Учет слотов экипировки от Deyzeria's Equipment Slots
         const isEquipped = foundry.utils.getProperty(item, "system.equipped") ?? false;
-        const equipmentSlot = foundry.utils.getProperty(item, "system.slot"); // Поддержка Deyzeria's Equipment Slots
+        const equipmentSlot = foundry.utils.getProperty(item, "system.slot");
         if (containerId) {
              const container = actor.items.get(containerId);
              if (container && isActualWeightContainer(container)) {
@@ -280,9 +290,8 @@ function modifyEncumbranceData(actor) {
     // Учет веса валюты, включая Item Piles
     let currencyWeight = 0;
     const currency = foundry.utils.getProperty(actor, "system.currency") || {};
-    currencyWeight = Object.values(currency).reduce((total, amount) => total + (Number(amount) || 0), 0) / 50; // 50 монет = 1 фунт
+    currencyWeight = Object.values(currency).reduce((total, amount) => total + (Number(amount) || 0), 0) / 50;
 
-    // NEW: Поддержка Item Piles для дополнительных источников валюты
     if (game.modules.get('item-piles')?.active) {
         const pileCurrency = foundry.utils.getProperty(actor, "system.itemPilesCurrency") || {};
         currencyWeight += Object.values(pileCurrency).reduce((total, amount) => total + (Number(amount) || 0), 0) / 50;
@@ -319,7 +328,6 @@ function modifyEncumbranceData(actor) {
         };
         enc.encumbered = enc.value > enc.thresholds.medium;
         enc.heavilyEncumbered = enc.value > enc.thresholds.heavy;
-
     } else if (enc.units === "%") {
          enc.thresholds = { light: 0, medium: 0, heavy: 0, maximum: 100 };
     } else {
@@ -372,7 +380,6 @@ Hooks.on('updateActor', (actor, change, options, userId) => {
         modifyEncumbranceData(actor);
         try { actor.sheet.render(false); } catch (e) { /* ignore */ }
     }
-    // NEW: Поддержка Item Piles для обновления при изменении itemPilesCurrency
     if (game.modules.get('item-piles')?.active && foundry.utils.hasProperty(change, 'system.itemPilesCurrency') && actor.sheet?.rendered) {
         modifyEncumbranceData(actor);
         try { actor.sheet.render(false); } catch (e) { /* ignore */ }
@@ -454,7 +461,6 @@ Hooks.on('renderItemSheet', (app, html, data) => {
 
     try { if (app.rendered) app.setPosition({ height: "auto" }); } catch (e) { /* Игнорируем */ }
 
-    // Обновление прогресс-бара
     if (isWeightContainer && app.actor) {
         try {
             updateContainerProgressBar(html, item, app.actor, {
@@ -462,17 +468,17 @@ Hooks.on('renderItemSheet', (app, html, data) => {
                     '.tab.contents[data-tab="contents"] .encumbrance .meter.progress',
                     '.tab.contents .progress-bar.encumbrance',
                     '.container-capacity-bar',
-                    '.tidy5e-sheet .encumbrance-bar', // Tidy 5e Sheets
-                    '.tidy5e .progress-bar',          // Tidy 5e Sheets альтернативный
-                    '.item-piles-progress'            // Item Piles
+                    '.tidy5e-sheet .encumbrance-bar',
+                    '.tidy5e .progress-bar',
+                    '.item-piles-progress'
                 ],
                 valueSelectors: [
                     '.tab.contents[data-tab="contents"] .encumbrance .meter .label .value',
                     '.tab.contents .encumbrance-value',
                     '.container-weight-value',
-                    '.tidy5e-sheet .encumbrance-value', // Tidy 5e Sheets
-                    '.tidy5e .weight-value',           // Tidy 5e Sheets альтернативный
-                    '.item-piles-weight'               // Item Piles
+                    '.tidy5e-sheet .encumbrance-value',
+                    '.tidy5e .weight-value',
+                    '.item-piles-weight'
                 ]
             });
         } catch (e) {
@@ -485,50 +491,70 @@ Hooks.on('renderItemSheet', (app, html, data) => {
  * Хук для проверки вместимости ПЕРЕД созданием предмета.
  */
 Hooks.on('preCreateItem', (itemDoc, createData, options, userId) => {
+    console.debug(`${MODULE_ID} | preCreateItem: Processing item creation`, { itemDoc, createData, options }); // NEW: Отладочный лог
+
     const parentActor = itemDoc.parent;
     const containerId = foundry.utils.getProperty(createData, 'system.container');
-    if (!(parentActor instanceof Actor) || !containerId) return true;
-    if (itemDoc.isTemporary) return true;
+    if (!(parentActor instanceof Actor) || !containerId) {
+        console.debug(`${MODULE_ID} | preCreateItem: No valid actor or containerId. Allowing creation.`);
+        return true;
+    }
+    if (itemDoc.isTemporary) {
+        console.debug(`${MODULE_ID} | preCreateItem: Item is temporary. Allowing creation.`);
+        return true;
+    }
 
     const actor = parentActor;
     const container = actor.items.get(containerId);
-    if (!container || !isActualWeightContainer(container)) return true;
+    if (!container || !isActualWeightContainer(container)) {
+        console.debug(`${MODULE_ID} | preCreateItem: Invalid or non-weight container. Allowing creation.`, { container });
+        return true;
+    }
 
     const containerMaxWeight = Number(foundry.utils.getProperty(container, "system.capacity.weight.value") ?? 0);
-    if (containerMaxWeight <= 0) return true;
+    if (containerMaxWeight <= 0) {
+        console.warn(`${MODULE_ID} | preCreateItem: Container max weight is invalid (${containerMaxWeight}). Allowing creation.`);
+        return true;
+    }
 
     let effectiveWeightToAdd = 0;
     try {
-        const tempItemData = foundry.utils.mergeObject(itemDoc.toObject(false), createData ?? {});
-        const itemToAddQuantity = Number(foundry.utils.getProperty(tempItemData, 'system.quantity') ?? 1);
-        const tempItemDoc = new Item(tempItemData, { temporary: true });
+        const tempItemData = foundry.utils.mergeObject(itemDoc.toObject(false), createData ?? {}, { recursive: true }); // MODIFIED: Глубокое слияние
+        const itemToAddQuantity = Math.max(1, Number(foundry.utils.getProperty(tempItemData, 'system.quantity') ?? 1)); // MODIFIED: quantity >= 1
+        const tempItemDoc = new Item(tempItemData, { parent: actor, temporary: true }); // MODIFIED: Указываем parent для корректного контекста
         effectiveWeightToAdd = getEffectiveItemWeight(tempItemDoc, actor) * itemToAddQuantity;
     } catch (err) {
-        console.error(`${MODULE_ID} | ERROR preCreateItem: Failed to calculate effective weight.`, err);
+        console.error(`${MODULE_ID} | preCreateItem: Failed to calculate effective weight. Blocking creation.`, err);
+        ui.notifications.error(game.i18n.localize("WEIGHTYCONTAINERS.ErrorCalculatingWeight"));
         return false;
     }
 
-    if (isNaN(effectiveWeightToAdd)) {
-        console.error(`${MODULE_ID} | ERROR preCreateItem: effectiveWeightToAdd is NaN.`);
+    if (isNaN(effectiveWeightToAdd) || effectiveWeightToAdd < 0) {
+        console.error(`${MODULE_ID} | preCreateItem: effectiveWeightToAdd is invalid (${effectiveWeightToAdd}). Blocking creation.`);
+        ui.notifications.error(game.i18n.localize("WEIGHTYCONTAINERS.ErrorCalculatingWeight"));
         return false;
     }
 
     const currentWeight = calculateCurrentContainerWeight(container, actor);
-     if (isNaN(currentWeight)) {
-        console.error(`${MODULE_ID} | ERROR preCreateItem: currentWeight is NaN.`);
+    if (isNaN(currentWeight) || currentWeight < 0) {
+        console.error(`${MODULE_ID} | preCreateItem: currentWeight is invalid (${currentWeight}). Blocking creation.`);
+        ui.notifications.error(game.i18n.localize("WEIGHTYCONTAINERS.ErrorCalculatingWeight"));
         return false;
     }
 
     const potentialTotalWeight = currentWeight + effectiveWeightToAdd;
     const tolerance = 0.001;
 
+    console.debug(`${MODULE_ID} | preCreateItem: Checking weight: Current=${currentWeight}, Adding=${effectiveWeightToAdd}, Max=${containerMaxWeight}, Total=${potentialTotalWeight}`); // NEW: Отладочный лог
+
     if (potentialTotalWeight > containerMaxWeight + tolerance) {
         const customMessage = game.settings.get(MODULE_ID, 'capacityExceededMessage') || "Container capacity exceeded.";
-        console.warn(`${MODULE_ID} | BLOCKED preCreateItem: Limit exceeded.`);
+        console.warn(`${MODULE_ID} | preCreateItem: Limit exceeded. Blocking creation.`, { potentialTotalWeight, containerMaxWeight });
         ui.notifications.warn(customMessage);
         return false;
     }
 
+    console.debug(`${MODULE_ID} | preCreateItem: Weight check passed. Allowing creation.`);
     return true;
 });
 
@@ -536,15 +562,20 @@ Hooks.on('preCreateItem', (itemDoc, createData, options, userId) => {
  * Хук для проверки вместимости ПЕРЕД обновлением предмета.
  */
 Hooks.on('preUpdateItem', (itemDoc, change, options, userId) => {
-    if (!(itemDoc.parent instanceof Actor)) return true;
+    console.debug(`${MODULE_ID} | preUpdateItem: Processing item update`, { itemDoc, change, options }); // NEW: Отладочный лог
+
+    if (!(itemDoc.parent instanceof Actor)) {
+        console.debug(`${MODULE_ID} | preUpdateItem: No valid actor. Allowing update.`);
+        return true;
+    }
 
     const actor = itemDoc.parent;
     const targetContainerId = foundry.utils.getProperty(change, 'system.container');
     const isChangingContainer = foundry.utils.hasProperty(change, 'system.container');
     const originalContainerId = foundry.utils.getProperty(itemDoc, "system.container");
 
-    const oldQuantity = foundry.utils.getProperty(itemDoc, "system.quantity") ?? 1;
-    const newQuantity = foundry.utils.getProperty(change, 'system.quantity') ?? oldQuantity;
+    const oldQuantity = Number(foundry.utils.getProperty(itemDoc, "system.quantity") ?? 1);
+    const newQuantity = Number(foundry.utils.getProperty(change, 'system.quantity') ?? oldQuantity);
     const isChangingQuantity = foundry.utils.hasProperty(change, 'system.quantity');
 
     let isMovingIntoContainer = false;
@@ -552,47 +583,61 @@ Hooks.on('preUpdateItem', (itemDoc, change, options, userId) => {
     let checkContainerId = null;
 
     if (isChangingContainer && targetContainerId && targetContainerId !== originalContainerId) {
-        isMovingIntoContainer = true; checkContainerId = targetContainerId;
+        isMovingIntoContainer = true;
+        checkContainerId = targetContainerId;
     } else if (isChangingContainer && !targetContainerId && originalContainerId) {
+        console.debug(`${MODULE_ID} | preUpdateItem: Removing from container. Allowing update.`);
         return true;
     }
 
     const finalContainerId = isChangingContainer ? targetContainerId : originalContainerId;
 
     if (isChangingQuantity && newQuantity > oldQuantity && finalContainerId) {
-        isQuantityIncreaseInContainer = true; if (!checkContainerId) checkContainerId = finalContainerId;
-    } else if (isChangingQuantity && newQuantity < oldQuantity && isMovingIntoContainer) {
-        if (!checkContainerId) checkContainerId = targetContainerId;
-    } else if (isChangingQuantity && newQuantity < oldQuantity && !isMovingIntoContainer) {
+        isQuantityIncreaseInContainer = true;
+        if (!checkContainerId) checkContainerId = finalContainerId;
+    } else if (isChangingQuantity && newQuantity <= oldQuantity) {
+        console.debug(`${MODULE_ID} | preUpdateItem: Quantity decreased or unchanged. Allowing update.`);
+        return true; // MODIFIED: Разрешать уменьшение количества
+    }
+
+    if (!checkContainerId) {
+        console.debug(`${MODULE_ID} | preUpdateItem: No container to check. Allowing update.`);
         return true;
     }
 
-    if (!checkContainerId) return true;
-
     const container = actor.items.get(checkContainerId);
-    if (!container || !isActualWeightContainer(container)) return true;
+    if (!container || !isActualWeightContainer(container)) {
+        console.debug(`${MODULE_ID} | preUpdateItem: Invalid or non-weight container. Allowing update.`, { container });
+        return true;
+    }
 
     const containerMaxWeight = Number(foundry.utils.getProperty(container, "system.capacity.weight.value") ?? 0);
-    if (containerMaxWeight <= 0) return true;
+    if (containerMaxWeight <= 0) {
+        console.warn(`${MODULE_ID} | preUpdateItem: Container max weight is invalid (${containerMaxWeight}). Allowing update.`);
+        return true;
+    }
 
     let effectiveSingleItemWeight = 0;
     try {
-        const changedItemData = foundry.utils.mergeObject(itemDoc.toObject(false), change ?? {});
-        const tempChangedItemDoc = new Item(changedItemData, { temporary: true });
+        const changedItemData = foundry.utils.mergeObject(itemDoc.toObject(false), change ?? {}, { recursive: true }); // MODIFIED: Глубокое слияние
+        const tempChangedItemDoc = new Item(changedItemData, { parent: actor, temporary: true }); // MODIFIED: Указываем parent
         effectiveSingleItemWeight = getEffectiveItemWeight(tempChangedItemDoc, actor);
     } catch (err) {
-        console.error(`${MODULE_ID} | ERROR preUpdateItem: Failed to calculate effective weight.`, err);
+        console.error(`${MODULE_ID} | preUpdateItem: Failed to calculate effective weight. Blocking update.`, err);
+        ui.notifications.error(game.i18n.localize("WEIGHTYCONTAINERS.ErrorCalculatingWeight"));
         return false;
     }
 
-    if (isNaN(effectiveSingleItemWeight)) {
-        console.error(`${MODULE_ID} | ERROR preUpdateItem: effectiveSingleItemWeight is NaN.`);
+    if (isNaN(effectiveSingleItemWeight) || effectiveSingleItemWeight < 0) {
+        console.error(`${MODULE_ID} | preUpdateItem: effectiveSingleItemWeight is invalid (${effectiveSingleItemWeight}). Blocking update.`);
+        ui.notifications.error(game.i18n.localize("WEIGHTYCONTAINERS.ErrorCalculatingWeight"));
         return false;
     }
 
     let currentWeightInTargetContainer = calculateCurrentContainerWeight(container, actor);
-     if (isNaN(currentWeightInTargetContainer)) {
-        console.error(`${MODULE_ID} | ERROR preUpdateItem: currentWeightInTargetContainer is NaN.`);
+    if (isNaN(currentWeightInTargetContainer) || currentWeightInTargetContainer < 0) {
+        console.error(`${MODULE_ID} | preUpdateItem: currentWeightInTargetContainer is invalid (${currentWeightInTargetContainer}). Blocking update.`);
+        ui.notifications.error(game.i18n.localize("WEIGHTYCONTAINERS.ErrorCalculatingWeight"));
         return false;
     }
 
@@ -601,31 +646,46 @@ Hooks.on('preUpdateItem', (itemDoc, change, options, userId) => {
 
     if (isMovingIntoContainer) {
         const weightOfMovedStack = effectiveSingleItemWeight * newQuantity;
-        if (isNaN(weightOfMovedStack)) { logReason = "NaN Error: weightOfMovedStack"; futureWeightInTargetContainer = NaN; }
-        else { futureWeightInTargetContainer = currentWeightInTargetContainer + weightOfMovedStack; logReason = `Move ${newQuantity} items`; }
+        if (isNaN(weightOfMovedStack)) {
+            logReason = "NaN Error: weightOfMovedStack";
+            futureWeightInTargetContainer = NaN;
+        } else {
+            futureWeightInTargetContainer = currentWeightInTargetContainer + weightOfMovedStack;
+            logReason = `Move ${newQuantity} items`;
+        }
     } else if (isQuantityIncreaseInContainer && checkContainerId === finalContainerId) {
         const quantityChange = newQuantity - oldQuantity;
         const addedWeight = effectiveSingleItemWeight * quantityChange;
-         if (isNaN(addedWeight)) { logReason = "NaN Error: addedWeight"; futureWeightInTargetContainer = NaN; }
-        else { futureWeightInTargetContainer = currentWeightInTargetContainer + addedWeight; logReason = `Increase by ${quantityChange}`; }
+        if (isNaN(addedWeight)) {
+            logReason = "NaN Error: addedWeight";
+            futureWeightInTargetContainer = NaN;
+        } else {
+            futureWeightInTargetContainer = currentWeightInTargetContainer + addedWeight;
+            logReason = `Increase by ${quantityChange}`;
+        }
     } else {
-        return true; // Другие случаи не проверяем
+        console.debug(`${MODULE_ID} | preUpdateItem: No relevant changes. Allowing update.`);
+        return true;
     }
 
-    if (isNaN(futureWeightInTargetContainer)) {
-        console.error(`${MODULE_ID} | ERROR preUpdateItem: futureWeightInTargetContainer is NaN. Reason: ${logReason}`);
+    if (isNaN(futureWeightInTargetContainer) || futureWeightInTargetContainer < 0) {
+        console.error(`${MODULE_ID} | preUpdateItem: futureWeightInTargetContainer is invalid (${futureWeightInTargetContainer}). Blocking update. Reason: ${logReason}`);
+        ui.notifications.error(game.i18n.localize("WEIGHTYCONTAINERS.ErrorCalculatingWeight"));
         return false;
     }
 
     const tolerance = 0.001;
 
+    console.debug(`${MODULE_ID} | preUpdateItem: Checking weight: Current=${currentWeightInTargetContainer}, Adding=${effectiveSingleItemWeight * (isMovingIntoContainer ? newQuantity : (newQuantity - oldQuantity))}, Max=${containerMaxWeight}, Total=${futureWeightInTargetContainer}`); // NEW: Отладочный лог
+
     if (futureWeightInTargetContainer > containerMaxWeight + tolerance) {
         const customMessage = game.settings.get(MODULE_ID, 'capacityExceededMessage') || "Container capacity exceeded.";
-        console.warn(`${MODULE_ID} | BLOCKED preUpdateItem: Limit exceeded.`);
+        console.warn(`${MODULE_ID} | preUpdateItem: Limit exceeded. Blocking update.`, { futureWeightInTargetContainer, containerMaxWeight });
         ui.notifications.warn(customMessage);
         return false;
     }
 
+    console.debug(`${MODULE_ID} | preUpdateItem: Weight check passed. Allowing update.`);
     return true;
 });
 
@@ -676,23 +736,22 @@ Hooks.on('renderActorSheet', (app, html, data) => {
             }
         }
 
-        // Обновляем прогресс-бар для контейнеров в инвентаре актора
         if (item.type === 'container' && isActualWeightContainer(item)) {
             updateContainerProgressBar($(element), item, actor, {
                 progressSelectors: [
                     '.container-progress',
                     '.progress-bar',
                     '.encumbrance-bar',
-                    '.tidy5e-sheet .encumbrance-bar', // Tidy 5e Sheets
-                    '.tidy5e .progress-bar',          // Tidy 5e Sheets альтернативный
-                    '.item-piles-progress'            // Item Piles
+                    '.tidy5e-sheet .encumbrance-bar',
+                    '.tidy5e .progress-bar',
+                    '.item-piles-progress'
                 ],
                 valueSelectors: [
                     '.container-weight',
                     '.weight-value',
-                    '.tidy5e-sheet .encumbrance-value', // Tidy 5e Sheets
-                    '.tidy5e .weight-value',           // Tidy 5e Sheets альтернативный
-                    '.item-piles-weight'               // Item Piles
+                    '.tidy5e-sheet .encumbrance-value',
+                    '.tidy5e .weight-value',
+                    '.item-piles-weight'
                 ]
             });
         }
@@ -742,7 +801,7 @@ Hooks.on("updateItem", (item, change, options, userId) => {
     const relevantChange = foundry.utils.hasProperty(change, flagPath)
                        || foundry.utils.hasProperty(change, 'system.container')
                        || foundry.utils.hasProperty(change, 'system.quantity')
-                       || foundry.utils.hasProperty(change, 'system.weight');
+                       || foundry.utils.getProperty(change, 'system.weight');
     if (relevantChange) {
         setTimeout(() => refreshDependentSheets(item), 50);
     }

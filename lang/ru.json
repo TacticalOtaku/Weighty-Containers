@@ -12,5 +12,6 @@
   "WEIGHTYCONTAINERS.CapacityWouldExceed": "Невозможно добавить/увеличить предмет. Вместимость контейнера '{containerName}' будет превышена.",
   "WEIGHTYCONTAINERS.ItemWeightLabel": "Эффективный вес",
   "WEIGHTYCONTAINERS.SettingCapacityMessageName": "Сообщение о превышении вместимости",
-  "WEIGHTYCONTAINERS.SettingCapacityMessageHint": "Текст уведомления, отображаемый при попытке превысить вместимость контейнера. Оставьте пустым для стандартного сообщения."
+  "WEIGHTYCONTAINERS.SettingCapacityMessageHint": "Текст уведомления, отображаемый при попытке превысить вместимость контейнера. Оставьте пустым для стандартного сообщения.",
+  "WEIGHTYCONTAINERS.ErrorCalculatingWeight": "Ошибка при расчете веса предмета или контейнера."
 }
