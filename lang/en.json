@@ -12,5 +12,6 @@
   "WEIGHTYCONTAINERS.CapacityWouldExceed": "Cannot add/increase item. Container '{containerName}' capacity would be exceeded.",
   "WEIGHTYCONTAINERS.ItemWeightLabel": "Effective Weight",
   "WEIGHTYCONTAINERS.SettingCapacityMessageName": "Capacity Exceeded Message",
-  "WEIGHTYCONTAINERS.SettingCapacityMessageHint": "The notification message displayed when trying to exceed container capacity. Leave empty to use default system message (if available)."
+  "WEIGHTYCONTAINERS.SettingCapacityMessageHint": "The notification message displayed when trying to exceed container capacity. Leave empty to use default system message (if available).",
+  "WEIGHTYCONTAINERS.ErrorCalculatingWeight": "Error in calculating the weight of an object or container."
 }
