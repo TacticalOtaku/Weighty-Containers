@@ -1,0 +1,58 @@
+/* Стили для отображения процента снижения веса */
+.cwm-weight-reduction-display {
+  /* Общие стили подложки */
+  background: rgba(0, 0, 0, 0.05);
+  border: 1px solid #AAA; /* Светлая рамка */
+  border-radius: 3px;
+  padding: 3px 6px;
+  margin: 2px 5px 2px 0; /* Отступы вокруг */
+  text-align: center;
+  font-size: 0.9em;
+  white-space: nowrap; /* Предотвращение переноса строки */
+  display: inline-block; /* Чтобы занимало место по содержимому */
+  vertical-align: middle; /* Выравнивание по центру с соседними элементами */
+}
+
+.cwm-weight-reduction-display .cwm-percentage {
+  font-weight: bold;
+  /* Цвета будут добавлены динамически через классы ниже */
+}
+
+/* Классы для окраски текста процента как редкость предметов */
+.cwm-reduction-common .cwm-percentage { color: var(--dnd5e-color-rarity-common, #353330); } /* Default Grey/Black */
+.cwm-reduction-uncommon .cwm-percentage { color: var(--dnd5e-color-rarity-uncommon, #008000); } /* Green */
+.cwm-reduction-rare .cwm-percentage { color: var(--dnd5e-color-rarity-rare, #0070dd); } /* Blue */
+.cwm-reduction-veryrare .cwm-percentage { color: var(--dnd5e-color-rarity-very-rare, #a335ee); } /* Purple */
+.cwm-reduction-legendary .cwm-percentage { color: var(--dnd5e-color-rarity-legendary, #ff8000); } /* Orange */
+.cwm-reduction-artifact .cwm-percentage { color: var(--dnd5e-color-rarity-artifact, #b17f4a); } /* Brownish/Gold */
+
+
+/* Стили для кнопки настройки */
+.cwm-configure-button {
+    flex: 0 0 30px; /* Не растягивать, фиксированная ширина */
+    height: 24px; /* Высота как у стандартных кнопок рядом */
+    line-height: 20px; /* Вертикальное выравнивание иконки */
+    margin: 0 5px 0 5px; /* Отступы */
+    text-align: center;
+    border: 1px solid #AAA;
+    background: rgba(0, 0, 0, 0.05);
+    border-radius: 3px;
+    color: #444; /* Цвет иконки */
+    font-size: 14px; /* Размер иконки */
+    cursor: pointer;
+    align-self: center; /* Выравнивание по центру по вертикали во flex-контейнере */
+}
+
+.cwm-configure-button:hover {
+    border-color: #888;
+    box-shadow: 0 0 5px red; /* Подсветка при наведении, как у стандартных */
+}
+
+/* Контейнер для выравнивания дисплея и кнопки */
+.cwm-controls-container {
+    display: flex;
+    align-items: center; /* Выровнять по центру вертикально */
+    justify-content: flex-start; /* Начать слева */
+    gap: 5px; /* Пространство между элементами */
+    margin-bottom: 5px; /* Отступ снизу */
+}

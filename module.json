@@ -1,36 +1,39 @@
 {
   "id": "weighty-containers",
   "title": "Weighty Containers",
-  "description": "Manages container weight capacity, allows weight reduction for items inside, and adjusts actor encumbrance display.",
-  "version": "1.2.9.4",
+  "description": "Manages container weight capacity, prevents overloading, and allows percentage-based weight reduction for items inside.",
+  "version": "1.3.0",
+  "authors": [
+    {
+      "name": "TacticalOtaku
+    }
+  ],
   "compatibility": {
     "minimum": "12.324",
     "verified": "12.331"
   },
-  "authors": [
-    {
-      "name": "TacticalOtaku"
-    }
-  ],
   "relationships": {
     "systems": [
       {
         "id": "dnd5e",
         "type": "system",
         "compatibility": {
-          "minimum": "3.2.0",
-          "verified": "4.3.9"
+           "minimum": "4.0.0",
+           "verified": "4.3.9"
         }
       }
     ],
     "requires": [],
-    "conflicts": []
+    "recommends": [
+        { "id": "midi-qol", "type": "module" },
+        { "id": "dae", "type": "module" }
+    ]
   },
   "esmodules": [
-    "main.js"
+    "module.js"
   ],
   "styles": [
-    "styles/weighty-containers.css"
+    "styles/styles.css"
   ],
   "languages": [
     {
@@ -50,5 +53,5 @@
   },
   "url": "https://github.com/TacticalOtaku/Weighty-Containers",
   "manifest": "https://raw.githubusercontent.com/TacticalOtaku/Weighty-Containers/main/module.json",
-  "download": "https://github.com/TacticalOtaku/Weighty-Containers/releases/download/v1.2.9.4/weighty-containers-v1.2.9.4.zip"
+  "download": "https://github.com/TacticalOtaku/Weighty-Containers/releases/download/v1.3.0/weighty-containers-v1.3.0.zip"
 }
