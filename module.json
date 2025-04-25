@@ -1,63 +1,54 @@
 {
-    "id": "weighty-containers",
-    "title": "Weighty Containers",
-    "description": "Manages container weight capacity, prevents overloading, and allows percentage-based weight reduction for items inside.",
-    "version": "1.3.8.2",
-    "authors": [
-        {
-            "name": "tacticalotaku"
+  "id": "weighty-containers",
+  "title": "Weighty Containers",
+  "description": "Manages container weight capacity, allows weight reduction for items inside, and adjusts actor encumbrance display.",
+  "version": "1.1.9",
+  "compatibility": {
+    "minimum": "12.324",
+    "verified": "12.331"
+  },
+  "authors": [
+    {
+      "name": "TacticalOtaku"
+    }
+  ],
+  "relationships": {
+    "systems": [
+      {
+        "id": "dnd5e",
+        "type": "system",
+        "compatibility": {
+          "minimum": "3.2.0",
+          "verified": "4.3.9"
         }
+      }
     ],
-    "compatibility": {
-        "minimum": "12.324",
-        "verified": "12.331"
+    "requires": [],
+    "conflicts": []
+  },
+  "esmodules": [
+    "main.js"
+  ],
+  "styles": [
+    "styles/weighty-containers.css"
+  ],
+  "languages": [
+    {
+      "lang": "en",
+      "name": "English",
+      "path": "lang/en.json"
     },
-    "relationships": {
-        "systems": [
-            {
-                "id": "dnd5e",
-                "type": "system",
-                "compatibility": {
-                    "minimum": "4.0.0",
-                    "verified": "4.3.9"
-                }
-            }
-        ],
-        "requires": [],
-        "recommends": [
-            {
-                "id": "midi-qol",
-                "type": "module"
-            },
-            {
-                "id": "dae",
-                "type": "module"
-            }
-        ]
-    },
-    "esmodules": [
-        "module.js"
-    ],
-    "styles": [
-        "styles/styles.css"
-    ],
-    "languages": [
-        {
-            "lang": "en",
-            "name": "English",
-            "path": "lang/en.json"
-        },
-        {
-            "lang": "ru",
-            "name": "Русский",
-            "path": "lang/ru.json"
-        }
-    ],
-    "flags": {
-        "scope": "world",
-        "requiresReload": true
-    },
-    "url": "https://github.com/TacticalOtaku/Weighty-Containers",
-    "manifest": "https://raw.githubusercontent.com/TacticalOtaku/Weighty-Containers/main/module.json",
-    "download": "https://github.com/TacticalOtaku/Weighty-Containers/releases/download/v1.3.8.2/weighty-containers-v1.3.8.2.zip"
+    {
+      "lang": "ru",
+      "name": "Русский",
+      "path": "lang/ru.json"
+    }
+  ],
+  "flags": {
+    "scope": "world",
+    "requiresReload": true
+  },
+  "url": "https://github.com/TacticalOtaku/Weighty-Containers",
+  "manifest": "https://raw.githubusercontent.com/TacticalOtaku/Weighty-Containers/main/module.json",
+  "download": "https://github.com/TacticalOtaku/Weighty-Containers/releases/download/v1.1.9/weighty-containers-v1.1.9.zip"
 }
