@@ -1,5 +1,6 @@
 const MODULE_ID = 'weighty-containers';
 const FLAG_WEIGHT_REDUCTION = 'weightReduction';
+const SOCKET_NAME = `module.${MODULE_ID}`;
 let libWrapper; // Переменная для libWrapper
 
 // --- Helper Functions ---
@@ -72,7 +73,7 @@ function getEffectiveItemWeight(item, actor = item?.actor) {
 }
 
 /**
- * Вычисляет общий текущий вес przedmiotов внутри контейнера.
+ * Вычисляет общий текущий вес предметов внутри контейнера.
  * @param {Item | null | undefined} containerItem - Документ предмета-контейнера.
  * @param {Actor | null | undefined} actor - Актер, которому принадлежит контейнер.
  * @returns {number} Суммарный эффективный вес содержимого.
@@ -113,7 +114,6 @@ function getRarityClassForReduction(reductionPercent) {
     return 'rarity-common';
 }
 
-// NEW: Вспомогательная функция для обновления прогресс-бара контейнера
 /**
  * Обновляет прогресс-бар контейнера в указанном DOM-элементе.
  * @param {jQuery} html - jQuery-объект DOM.
@@ -132,13 +132,13 @@ function updateContainerProgressBar(html, containerItem, actor, options = {}) {
 
     const progressSelectors = options.progressSelectors || [
         '.encumbrance .meter.progress',
-        '.progress-bar.encumbrance', // Альтернативный селектор для других листов
-        '.container-capacity-bar'   // Для кастомных интерфейсов
+        '.progress-bar.encumbrance',
+        '.container-capacity-bar'
     ];
     const valueSelectors = options.valueSelectors || [
         '.encumbrance .meter .label .value',
-        '.encumbrance-value', // Альтернативный селектор
-        '.container-weight-value' // Для кастомных интерфейсов
+        '.encumbrance-value',
+        '.container-weight-value'
     ];
 
     progressSelectors.forEach(selector => {
@@ -155,6 +155,39 @@ function updateContainerProgressBar(html, containerItem, actor, options = {}) {
         if (valueElement.length > 0) {
             valueElement.text(Math.round(effectiveCurrentWeight * 100) / 100);
         }
+    });
+}
+
+// --- Socket Handlers for Multiplayer Sync ---
+
+/**
+ * Регистрирует сокет для синхронизации изменений.
+ */
+function registerSocket() {
+    game.socket.on(SOCKET_NAME, ({ type, data }) => {
+        if (type === 'updateContainer') {
+            const { itemId, actorId } = data;
+            const actor = game.actors.get(actorId);
+            const item = actor?.items.get(itemId);
+            if (item && item.sheet?.rendered) {
+                item.sheet.render(false);
+            }
+            if (actor && actor.sheet?.rendered) {
+                actor.sheet.render(false);
+            }
+        }
+    });
+}
+
+/**
+ * Транслирует обновление контейнера всем клиентам.
+ * @param {string} itemId - ID контейнера.
+ * @param {string} actorId - ID актера.
+ */
+function broadcastContainerUpdate(itemId, actorId) {
+    game.socket.emit(SOCKET_NAME, {
+        type: 'updateContainer',
+        data: { itemId, actorId }
     });
 }
 
@@ -200,6 +233,7 @@ Hooks.once('init', () => {
 
 Hooks.once('setup', () => {
     console.log(`${MODULE_ID} | HOOK: setup`);
+    registerSocket();
 });
 
 // --- Патчинг данных актора ---
@@ -331,6 +365,7 @@ Hooks.on('updateActor', (actor, change, options, userId) => {
     if (foundry.utils.hasProperty(change, 'system.currency') && actor.sheet?.rendered) {
         modifyEncumbranceData(actor);
         try { actor.sheet.render(false); } catch (e) { /* ignore */ }
+        broadcastContainerUpdate(null, actor.id);
     }
 });
 
@@ -338,7 +373,9 @@ Hooks.on('updateActor', (actor, change, options, userId) => {
  * Добавляем UI элементы на лист контейнера.
  */
 Hooks.on('renderItemSheet', (app, html, data) => {
-    if (!(app instanceof ItemSheet) || !app.object) return;
+    const isV13 = foundry.utils.isNewerVersion(game.version, '13');
+    const sheetClass = isV13 ? ItemSheetV2 : ItemSheet;
+    if (!(app instanceof sheetClass) || !app.object) return;
     const item = app.object;
 
     const isWeightContainer = isActualWeightContainer(item);
@@ -352,7 +389,7 @@ Hooks.on('renderItemSheet', (app, html, data) => {
     const reductionPercent = getWeightReductionPercent(item);
     const canConfigure = game.user?.isGM || !game.settings.get(MODULE_ID, 'gmOnlyConfig');
     const rarityClass = getRarityClassForReduction(reductionPercent);
-    const uiWrapper = $('<div class="weighty-container-ui-wrapper" style="display: flex; align-items: center; gap: 5px; margin-top EconomyContextMenu: 3px;"></div>');
+    const uiWrapper = $('<div class="weighty-container-ui-wrapper" style="display: flex; align-items: center; gap: 5px; margin-top: 3px;"></div>');
 
     const reductionDisplayHTML = `
       <div class="weighty-container-reduction-display ${rarityClass}" title="${game.i18n.localize('WEIGHTYCONTAINERS.WeightReductionLabel')}">
@@ -391,6 +428,7 @@ Hooks.on('renderItemSheet', (app, html, data) => {
                                 }
                                 await item.setFlag(MODULE_ID, FLAG_WEIGHT_REDUCTION, newPercentage);
                                 ui.notifications.info(`Set ${item.name} weight reduction to ${newPercentage}%`);
+                                broadcastContainerUpdate(item.id, item.actor?.id);
                             } catch (e) {
                                 console.error(`${MODULE_ID} | Error setting flag:`, e);
                                 ui.notifications.error("Error saving weight reduction setting.");
@@ -494,7 +532,7 @@ Hooks.on('preUpdateItem', (itemDoc, change, options, userId) => {
 
     const oldQuantity = foundry.utils.getProperty(itemDoc, "system.quantity") ?? 1;
     const newQuantity = foundry.utils.getProperty(change, 'system.quantity') ?? oldQuantity;
-    const isChangingQuantity = foundry.utils.hasProperty(change, 'system.quantity');
+    const isChangingQuantity = foundry.utils.getProperty(change, 'system.quantity');
 
     let isMovingIntoContainer = false;
     let isQuantityIncreaseInContainer = false;
@@ -582,7 +620,9 @@ Hooks.on('preUpdateItem', (itemDoc, change, options, userId) => {
  * Добавляем отображение эффективного веса и прогресс-бара на листе актора
  */
 Hooks.on('renderActorSheet', (app, html, data) => {
-    if (!(app instanceof ActorSheet) || !app.actor || ['npc', 'vehicle'].includes(app.actor.type)) return;
+    const isV13 = foundry.utils.isNewerVersion(game.version, '13');
+    const sheetClass = isV13 ? ActorSheetV2 : ActorSheet;
+    if (!(app instanceof sheetClass) || !app.actor || ['npc', 'vehicle'].includes(app.actor.type)) return;
     const actor = app.actor;
 
     html.find('.inventory-list .item[data-item-id]').each((index, element) => {
@@ -642,7 +682,7 @@ function refreshDependentSheets(item) {
     const actor = item.actor;
     if (!actor) return;
 
-    if (actor.sheet instanceof ActorSheet && actor.sheet.rendered) {
+    if (actor.sheet instanceof (foundry.utils.isNewerVersion(game.version, '13') ? ActorSheetV2 : ActorSheet) && actor.sheet.rendered) {
         try { actor.sheet.render(false); } catch(e) { /* ignore */ }
     }
 
@@ -653,11 +693,11 @@ function refreshDependentSheets(item) {
     if (originalContainerId && originalContainerId !== currentContainerId) containerIdsToRefresh.add(originalContainerId);
 
     if (item.type === 'container') {
-         if (item.sheet instanceof ItemSheet && item.sheet.rendered) {
+         if (item.sheet instanceof (foundry.utils.isNewerVersion(game.version, '13') ? ItemSheetV2 : ItemSheet) && item.sheet.rendered) {
              try { item.sheet.render(false); } catch(e) { /* ignore */ }
          }
          Object.values(ui.windows).forEach(window => {
-            if (window instanceof ActorSheet && window.actor?.items?.get(item.id) && window.rendered) {
+            if (window instanceof (foundry.utils.isNewerVersion(game.version, '13') ? ActorSheetV2 : ActorSheet) && window.actor?.items?.get(item.id) && window.rendered) {
                  try { window.render(false); } catch(e) { /* ignore */ }
             }
          });
@@ -666,11 +706,13 @@ function refreshDependentSheets(item) {
     containerIdsToRefresh.forEach(containerId => {
         if (typeof containerId === 'string') {
              const container = actor.items.get(containerId);
-             if (container && container.sheet instanceof ItemSheet && container.sheet.rendered) {
+             if (container && container.sheet instanceof (foundry.utils.isNewerVersion(game.version, '13') ? ItemSheetV2 : ItemSheet) && container.sheet.rendered) {
                  try { container.sheet.render(false); } catch(e) { /* ignore */ }
              }
         }
     });
+
+    broadcastContainerUpdate(item.id, actor.id);
 }
 
 Hooks.on("updateItem", (item, change, options, userId) => {
@@ -680,13 +722,13 @@ Hooks.on("updateItem", (item, change, options, userId) => {
                        || foundry.utils.hasProperty(change, 'system.quantity')
                        || foundry.utils.hasProperty(change, 'system.weight');
     if (relevantChange) {
-        setTimeout(() => refreshDependentSheets(item), 50);
+        foundry.utils.debounce(() => refreshDependentSheets(item), 50)();
     }
 });
 
 Hooks.on("deleteItem", (item, options, userId) => {
     if (item.actor && foundry.utils.getProperty(item, "system.container")) {
-        setTimeout(() => refreshDependentSheets(item), 50);
+        foundry.utils.debounce(() => refreshDependentSheets(item), 50)();
     }
 });
 
