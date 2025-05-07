@@ -1,68 +1,113 @@
-/* Стили для отображения процента снижения веса и кнопки */
+/* Styles for weight reduction display and config button */
 .weighty-container-ui-wrapper {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-top: 3px; /* Немного отступа сверху */
-  justify-content: flex-start; /* Выравнивание по левому краю внутри блока */
-  width: fit-content; /* Ширина по содержимому */
-}
-
-.weighty-container-reduction-display {
-  background: rgba(0, 0, 0, 0.1);
-  border: 1px solid #666;
-  border-radius: 3px;
-  padding: 2px 6px;
-  font-size: 0.9em;
-  font-weight: bold;
-  text-align: center;
-  white-space: nowrap;
-}
-
-/* Размещаем блок UI внутри .middle.identity-info */
-header.sheet-header .middle.identity-info {
     display: flex;
-    flex-direction: column; /* Элементы друг под другом */
-    align-items: flex-start; /* Выравнивание по левому краю */
+    align-items: center;
+    gap: 5px;
+    margin-top: 3px;
+    justify-content: flex-start;
+    width: fit-content;
+    flex-wrap: wrap; /* Allow wrapping on small screens */
 }
 
-/* Стили для кнопки конфигурации */
+/* Container for weight reduction percentage */
+.weighty-container-reduction-display {
+    background: rgba(0, 0, 0, 0.1);
+    border: 1px solid #666;
+    border-radius: 3px;
+    padding: 2px 6px;
+    font-size: 0.9em;
+    font-weight: bold;
+    text-align: center;
+    white-space: nowrap;
+}
+
+/* Ensure UI wrapper fits within sheet header */
+.sheet-header .middle.identity-info,
+.sheet-header {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+}
+
+/* Config button styles */
 .weighty-container-config-btn {
-  flex: 0 0 20px;
-  height: 20px;
-  line-height: 18px;
-  font-size: 14px;
-  padding: 0;
-  border: none;
-  background: none;
-  color: #7a7971;
+    flex: 0 0 20px;
+    height: 20px;
+    line-height: 18px;
+    font-size: 14px;
+    padding: 0;
+    border: none;
+    background: none;
+    color: #7a7971;
 }
 
 .weighty-container-config-btn:hover {
-  color: #191813;
-  text-shadow: none;
+    color: #191813;
+    text-shadow: none;
 }
 
-/* Цвета редкости */
-.weighty-container-reduction-display.rarity-common { color: var(--dnd5e-color-rarity-common, #5E5E5E); border-color: var(--dnd5e-color-rarity-common, #5E5E5E); }
-.weighty-container-reduction-display.rarity-uncommon { color: var(--dnd5e-color-rarity-uncommon, #167008); border-color: var(--dnd5e-color-rarity-uncommon, #167008); }
-.weighty-container-reduction-display.rarity-rare { color: var(--dnd5e-color-rarity-rare, #003A98); border-color: var(--dnd5e-color-rarity-rare, #003A98); }
-.weighty-container-reduction-display.rarity-very-rare { color: var(--dnd5e-color-rarity-very-rare, #51008A); border-color: var(--dnd5e-color-rarity-very-rare, #51008A); }
-.weighty-container-reduction-display.rarity-legendary { color: var(--dnd5e-color-rarity-legendary, #A85D00); border-color: var(--dnd5e-color-rarity-legendary, #A85D00); }
-.weighty-container-reduction-display.rarity-artifact { color: var(--dnd5e-color-rarity-artifact, #8A0000); border-color: var(--dnd5e-color-rarity-artifact, #8A0000); }
+/* Rarity colors with fallbacks */
+.weighty-container-reduction-display.rarity-common {
+    color: var(--dnd5e-color-rarity-common, #5E5E5E);
+    border-color: var(--dnd5e-color-rarity-common, #5E5E5E);
+}
+.weighty-container-reduction-display.ra-uncommon {
+    color: var(--dnd5e-color-rarity-uncommon, #167008);
+    border-color: var(--dnd5e-color-rarity-uncommon, #167008);
+}
+.weighty-container-reduction-display.rarity-rare {
+    color: var(--dnd5e-color-rarity-rare, #003A98);
+    border-color: var(--dnd5e-color-rarity-rare, #003A98);
+}
+.weighty-container-reduction-display.rarity-very-rare {
+    color: var(--dnd5e-color-rarity-very-rare, #51008A);
+    border-color: var(--dnd5e-color-rarity-very-rare, #51008A);
+}
+.weighty-container-reduction-display.rarity-legendary {
+    color: var(--dnd5e-color-rarity-legendary, #A85D00);
+    border-color: var(--dnd5e-color-rarity-legendary, #A85D00);
+}
+.weighty-container-reduction-display.rarity-artifact {
+    color: var(--dnd5e-color-rarity-artifact, #8A0000);
+    border-color: var(--dnd5e-color-rarity-artifact, #8A0000);
+}
 
-/* Стиль для отображения эффективного веса на листе актора */
+/* Effective weight display on actor sheet */
 .inventory-list .item .item-weight .weighty-effective-weight {
-  font-style: italic;
-  color: #555;
-  font-size: 0.9em;
-  margin-left: 3px;
+    font-style: italic;
+    color: #555;
+    font-size: 0.9em;
+    margin-left: 3px;
 }
 
-/* Стиль для кастомного уведомления */
-/* .notification.weighty-notification { */
-  /* border: 2px solid var(--dnd5e-color-rarity-rare, #003A98); */
-  /* background-color: rgba(10, 10, 25, 0.85); */
-  /* color: #eee; */
-  /* Пока закомментировано, т.к. customClass в ui.notifications тоже закомментирован */
-/* } */
+/* Progress bar styles */
+.encumbrance .meter.progress,
+.progress-bar.encumbrance,
+.container-capacity-bar {
+    background: #eee;
+    border: 1px solid #666;
+    border-radius: 3px;
+    height: 8px;
+    overflow: hidden;
+    position: relative;
+}
+
+.encumbrance .meter.progress::before,
+.progress-bar.encumbrance::before,
+.container-capacity-bar::before {
+    content: '';
+    display: block;
+    height: 100%;
+    background: var(--dnd5e-color-rarity-rare, #003A98);
+    width: var(--bar-percentage, 0%);
+    transition: width 0.3s ease;
+}
+
+/* Custom notification styling */
+.notification.weighty-notification {
+    border: 2px solid var(--dnd5e-color-rarity-rare, #003A98);
+    background-color: rgba(10, 10, 25, 0.85);
+    color: #eee;
+    padding: 8px;
+    border-radius: 4px;
+}
