@@ -1,5 +1,3 @@
---- START OF FILE main.js ---
-
 const MODULE_ID = 'weighty-containers';
 const FLAG_WEIGHT_REDUCTION = 'weightReduction';
 const SOCKET_NAME = `module.${MODULE_ID}`;
@@ -77,7 +75,6 @@ function getWeightDisplaySettings() {
     const currencyWeight = game.settings.get("dnd5e", "currencyWeight") ?? true;
     return { multiplier, units, currencyWeight };
 }
-
 
 /**
  * Calculates the effective weight of an item, considering container weight reduction and metric system.
@@ -203,7 +200,6 @@ function updateContainerProgressBar(html, containerItem, actor, options = {}) {
     }
     options.progressSelectors?.forEach(selector => html.find(selector).parent().show());
 
-
     const progressSelectors = options.progressSelectors || [
         '.encumbrance-bar',
         '.progress-bar.encumbrance',
@@ -296,8 +292,8 @@ Hooks.once('init', () => {
     }
 
     game.settings.register(MODULE_ID, 'gmOnlyConfig', {
-        name: "GM Only Config",
-        hint: "If checked, only GMs can change container weight reduction settings.",
+        name: "WEIGHTYCONTAINERS.SettingGMOnlyConfig",
+        hint: "WEIGHTYCONTAINERS.SettingGMOnlyConfigHint",
         scope: 'world',
         config: true,
         type: Boolean,
@@ -308,31 +304,21 @@ Hooks.once('init', () => {
     });
 
     game.settings.register(MODULE_ID, 'capacityExceededMessage', {
-        name: "Capacity Exceeded Message",
-        hint: "The message shown when trying to overfill a container. Use {item} and {container} for names.",
+        name: "WEIGHTYCONTAINERS.SettingCapacityMessageName",
+        hint: "WEIGHTYCONTAINERS.SettingCapacityMessageHint",
         scope: 'world',
         config: true,
         type: String,
-        default: "Cannot add {item}, {container} is full!"
+        default: "WEIGHTYCONTAINERS.DefaultCapacityMessage"
     });
 
     Hooks.once('i18nInit', () => {
-        const settings = game.settings.settings;
-        if (settings.get(`${MODULE_ID}.gmOnlyConfig`)) {
-            settings.get(`${MODULE_ID}.gmOnlyConfig`).name = game.i18n.localize("WEIGHTYCONTAINERS.SettingGMOnlyConfig");
-            settings.get(`${MODULE_ID}.gmOnlyConfig`).hint = game.i18n.localize("WEIGHTYCONTAINERS.SettingGMOnlyConfigHint");
+        console.log(`${MODULE_ID} | i18nInit hook called`); // Диагностика
+        if (!game?.i18n?.translations) {
+            console.warn(`${MODULE_ID} | game.i18n.translations is not initialized. Skipping localization setup.`);
+            return;
         }
-        if (settings.get(`${MODULE_ID}.capacityExceededMessage`)) {
-            settings.get(`${MODULE_ID}.capacityExceededMessage`).name = game.i18n.localize("WEIGHTYCONTAINERS.SettingCapacityMessageName");
-            settings.get(`${MODULE_ID}.capacityExceededMessage`).hint = game.i18n.localize("WEIGHTYCONTAINERS.SettingCapacityMessageHint");
-            // Only set default if it's the English fallback and a localized default exists
-            if (settings.get(`${MODULE_ID}.capacityExceededMessage`).default === "Cannot add {item}, {container} is full!") {
-                 const localizedDefault = game.i18n.localize("WEIGHTYCONTAINERS.DefaultCapacityMessage");
-                 if (localizedDefault && localizedDefault !== "WEIGHTYCONTAINERS.DefaultCapacityMessage") {
-                     settings.get(`${MODULE_ID}.capacityExceededMessage`).default = localizedDefault;
-                 }
-            }
-        }
+        console.log(`${MODULE_ID} | Localization setup completed`); // Диагностика
     });
     console.log(`${MODULE_ID} | Settings Initialized`);
 });
@@ -416,7 +402,7 @@ function patchActorDerivedData() {
             }, "WRAPPER");
             console.log(`${MODULE_ID} | Successfully wrapped ${targetMethodPath} with libWrapper.`);
         } catch (e) {
-             console.error(`${MODULE_ID} | Failed to wrap ${targetMethodPath} with libWrapper:`, e);
+            console.error(`${MODULE_ID} | Failed to wrap ${targetMethodPath} with libWrapper:`, e);
         }
     } else {
         console.warn(`${MODULE_ID} | libWrapper not active. Attempting manual patch for ${targetMethodPath}...`);
@@ -448,7 +434,7 @@ Hooks.on('updateActor', (actor, change, options, userId) => {
         // prepareDerivedData will be called, which calls modifyEncumbranceData.
         // Actor sheet should re-render. We just need to notify other clients if currency changed.
         if (game.user.id === userId) { // Only the user making the change broadcasts
-             broadcastContainerUpdate(null, actor.id);
+            broadcastContainerUpdate(null, actor.id);
         }
     }
 });
@@ -524,7 +510,7 @@ Hooks.on('renderItemSheet', (app, html, data) => {
         if (contentsTab.length > 0) {
             const capacityDisplay = contentsTab.find('.encumbrance, .container-capacity'); // D&D5e 2.x/3.x and 4.x
             if (capacityDisplay.length) {
-                 updateContainerProgressBar(capacityDisplay, item, item.actor); // options will use defaults
+                updateContainerProgressBar(capacityDisplay, item, item.actor); // options will use defaults
             }
         }
     }
@@ -579,7 +565,10 @@ Hooks.on('preCreateItem', (itemDoc, createData, options, userId) => {
     const tolerance = 0.001;
 
     if (potentialTotalWeightBase > containerMaxWeightBase + tolerance) {
-        let msg = game.settings.get(MODULE_ID, 'capacityExceededMessage') || "Container capacity exceeded!";
+        let msg = game.settings.get(MODULE_ID, 'capacityExceededMessage');
+        if (!msg) {
+            msg = game.i18n.localize("WEIGHTYCONTAINERS.CapacityExceeded");
+        }
         msg = msg.replace("{item}", (createData.name || itemDoc.name)).replace("{container}", container.name);
         ui.notifications.warn(msg);
         return false;
@@ -615,7 +604,6 @@ Hooks.on('preUpdateItem', (itemDoc, change, options, userId) => {
     // Ensure the temp item uses the TARGET container ID for weight calculation
     if (targetContainerId) changedItemData.system.container = targetContainerId;
     else delete changedItemData.system.container; // if moving out of all containers
-
 
     const tempChangedItemDoc = new Item.implementation(changedItemData, { temporary: true, parent: actor });
     const effectiveSingleItemWeightBase = getEffectiveItemWeight(tempChangedItemDoc, actor, false);
@@ -659,12 +647,14 @@ Hooks.on('preUpdateItem', (itemDoc, change, options, userId) => {
         currentWeightInTargetContainerBase = Math.max(0, currentWeightInTargetContainerBase); // safety
     }
 
-
     const potentialTotalWeightBase = currentWeightInTargetContainerBase + (effectiveSingleItemWeightBase * newQuantity) ; // Add the full new stack weight
 
     const tolerance = 0.001;
     if (potentialTotalWeightBase > containerMaxWeightBase + tolerance) {
-        let msg = game.settings.get(MODULE_ID, 'capacityExceededMessage') || "Container capacity exceeded!";
+        let msg = game.settings.get(MODULE_ID, 'capacityExceededMessage');
+        if (!msg) {
+            msg = game.i18n.localize("WEIGHTYCONTAINERS.CapacityExceeded");
+        }
         const itemName = foundry.utils.getProperty(change, 'name') || itemDoc.name;
         msg = msg.replace("{item}", itemName).replace("{container}", container.name);
         ui.notifications.warn(msg);
@@ -723,7 +713,7 @@ Hooks.on('renderActorSheet', (app, html, data) => {
                 capacityDisplay = $element.find('.encumbrance'); // Look for general encumbrance div for this item
             }
             if (capacityDisplay.length > 0) {
-                 updateContainerProgressBar(capacityDisplay, item, actor);
+                updateContainerProgressBar(capacityDisplay, item, actor);
             }
         }
     });
@@ -744,9 +734,9 @@ function refreshActorAndItemSheets(actorId, itemId = null) {
         }
         // If the item itself is a container, or was in a container, refresh related sheets
         if (item?.type === 'container') {
-             Object.values(ui.windows).forEach(win => {
+            Object.values(ui.windows).forEach(win => {
                 if (win instanceof ItemSheet && win.object.id === item.id && win.rendered) {
-                     win.render(false);
+                    win.render(false);
                 }
             });
         }
@@ -756,10 +746,9 @@ function refreshActorAndItemSheets(actorId, itemId = null) {
             if (container && container.sheet?.rendered) container.sheet.render(false);
         }
     }
-     // Also refresh sheets of any open containers for this actor
+    // Also refresh sheets of any open containers for this actor
     actor.items.filter(i => i.type === 'container' && i.sheet?.rendered).forEach(c => c.sheet.render(false));
 }
-
 
 Hooks.on("updateItem", (item, change, options, userId) => {
     if (!item.actor) return;
@@ -825,7 +814,7 @@ Hooks.on("deleteItem", (itemDoc, options, userId) => {
                 });
                 // If the deleted container was itself inside another container, that parent container might need an update
                 // but this scenario is less common for "weighty" containers.
-                 containerToRefreshId = deletedItemId; // Signal this container ID was deleted
+                containerToRefreshId = deletedItemId; // Signal this container ID was deleted
             }
 
             if (containerToRefreshId && containerToRefreshId !== deletedItemId) { // if it was content in a container
@@ -834,7 +823,7 @@ Hooks.on("deleteItem", (itemDoc, options, userId) => {
                     container.sheet.render(false);
                 }
             }
-            
+
             if (game.user.id === userId) {
                 if (containerToRefreshId) broadcastContainerUpdate(containerToRefreshId, actor.id);
                 broadcastContainerUpdate(null, actor.id); // General actor update as well
@@ -843,36 +832,3 @@ Hooks.on("deleteItem", (itemDoc, options, userId) => {
         }, 150)();
     }
 });
-
-
-Hooks.once('i18nInit', () => {
-    if (!game.i18n.translations.WEIGHTYCONTAINERS) {
-        game.i18n.translations.WEIGHTYCONTAINERS = {};
-    }
-    const defaults = {
-        "SettingGMOnlyConfig": "GM Only Configuration",
-        "SettingGMOnlyConfigHint": "If checked, only Game Masters can alter the weight reduction settings of containers.",
-        "SettingCapacityMessageName": "Capacity Exceeded Message",
-        "SettingCapacityMessageHint": "Message displayed when trying to add an item to a full container. Use {item} and {container} for names.",
-        "DefaultCapacityMessage": "Cannot add {item}, {container} is full!",
-        "WeightReductionLabel": "Weight Reduction",
-        "ReductionSuffix": "Red.",
-        "ConfigButtonTooltip": "Configure Weight Reduction",
-        "ConfigButtonLabel": "Config",
-        "ConfigPrompt": "Enter weight reduction percentage (0-100):",
-        "ConfigWindowTitle": "Set Container Weight Reduction",
-        "ConfigSave": "Save",
-        "ConfigCancel": "Cancel",
-        "InvalidPercentage": "Please enter a number between 0 and 100.",
-        "CapacityExceeded": "Container capacity exceeded!",
-        "ItemWeightLabel": "Eff. Wt.",
-        "EffectiveAbbreviation": "Eff"
-    };
-    for (const [key, value] of Object.entries(defaults)) {
-        if (!game.i18n.translations.WEIGHTYCONTAINERS[key]) {
-            game.i18n.translations.WEIGHTYCONTAINERS[key] = value;
-        }
-    }
-});
-
---- END OF FILE main.js ---

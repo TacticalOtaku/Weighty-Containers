@@ -8,9 +8,13 @@
   "WEIGHTYCONTAINERS.ConfigCancel": "Cancel",
   "WEIGHTYCONTAINERS.InvalidPercentage": "Please enter a valid percentage between 0 and 100.",
   "WEIGHTYCONTAINERS.WeightReductionLabel": "Weight Reduction:",
-  "WEIGHTYCONTAINERS.CapacityExceeded": "Cannot add/increase item. Container '{containerName}' capacity exceeded.",
-  "WEIGHTYCONTAINERS.CapacityWouldExceed": "Cannot add/increase item. Container '{containerName}' capacity would be exceeded.",
+  "WEIGHTYCONTAINERS.CapacityExceeded": "Cannot add/increase item. Container '{container}' capacity exceeded.",
+  "WEIGHTYCONTAINERS.CapacityWouldExceed": "Cannot add/increase item. Container '{container}' capacity would be exceeded.",
   "WEIGHTYCONTAINERS.ItemWeightLabel": "Effective Weight",
   "WEIGHTYCONTAINERS.SettingCapacityMessageName": "Capacity Exceeded Message",
-  "WEIGHTYCONTAINERS.SettingCapacityMessageHint": "The notification message displayed when trying to exceed container capacity. Leave empty to use default system message (if available)."
+  "WEIGHTYCONTAINERS.SettingCapacityMessageHint": "The notification message displayed when trying to exceed container capacity. Leave empty to use default system message (if available).",
+  "WEIGHTYCONTAINERS.DefaultCapacityMessage": "Cannot add {item}, {container} is full!",
+  "WEIGHTYCONTAINERS.ReductionSuffix": "Red.",
+  "WEIGHTYCONTAINERS.ConfigButtonLabel": "Config",
+  "WEIGHTYCONTAINERS.EffectiveAbbreviation": "Eff"
 }
