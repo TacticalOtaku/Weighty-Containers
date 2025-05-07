@@ -8,9 +8,13 @@
   "WEIGHTYCONTAINERS.ConfigCancel": "Отмена",
   "WEIGHTYCONTAINERS.InvalidPercentage": "Пожалуйста, введите корректный процент от 0 до 100.",
   "WEIGHTYCONTAINERS.WeightReductionLabel": "Снижение веса:",
-  "WEIGHTYCONTAINERS.CapacityExceeded": "Невозможно добавить/увеличить предмет. Вместимость контейнера '{containerName}' превышена.",
-  "WEIGHTYCONTAINERS.CapacityWouldExceed": "Невозможно добавить/увеличить предмет. Вместимость контейнера '{containerName}' будет превышена.",
+  "WEIGHTYCONTAINERS.CapacityExceeded": "Невозможно добавить/увеличить предмет. Вместимость контейнера '{container}' превышена.",
+  "WEIGHTYCONTAINERS.CapacityWouldExceed": "Невозможно добавить/увеличить предмет. Вместимость контейнера '{container}' будет превышена.",
   "WEIGHTYCONTAINERS.ItemWeightLabel": "Эффективный вес",
   "WEIGHTYCONTAINERS.SettingCapacityMessageName": "Сообщение о превышении вместимости",
-  "WEIGHTYCONTAINERS.SettingCapacityMessageHint": "Текст уведомления, отображаемый при попытке превысить вместимость контейнера. Оставьте пустым для стандартного сообщения."
+  "WEIGHTYCONTAINERS.SettingCapacityMessageHint": "Текст уведомления, отображаемый при попытке превысить вместимость контейнера. Оставьте пустым для стандартного сообщения.",
+  "WEIGHTYCONTAINERS.DefaultCapacityMessage": "Невозможно добавить {item}, контейнер {container} полон!",
+  "WEIGHTYCONTAINERS.ReductionSuffix": "Сн.",
+  "WEIGHTYCONTAINERS.ConfigButtonLabel": "Настр.",
+  "WEIGHTYCONTAINERS.EffectiveAbbreviation": "Эфф."
 }
