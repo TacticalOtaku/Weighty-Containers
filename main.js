@@ -36,7 +36,7 @@ function getWeightReductionPercent(containerItem) {
 
 /**
  * Retrieves weight display settings based on D&D 5e configuration.
- * @returns {{ multiplier: number, units: string, currencyWeight: boolean, currencyDivisor: number }}
+ * @returns {{ multiplier: number, units: string, currencyWeight: boolean, currencyDivisor: number, isMetric: boolean }}
  */
 function getWeightDisplaySettings() {
     let isMetric = false;
@@ -49,14 +49,14 @@ function getWeightDisplaySettings() {
     const units = isMetric ? "kg" : game.i18n.localize("DND5E.AbbreviationLbs");
     const currencyWeight = game.settings.get("dnd5e", "currencyWeight") ?? true;
     const currencyDivisor = game.settings.get(MODULE_ID, "currencyDivisor") || 50;
-    return { multiplier, units, currencyWeight, currencyDivisor };
+    return { multiplier, units, currencyWeight, currencyDivisor, isMetric };
 }
 
 /**
  * Gets the effective weight of an item, considering container reduction and metric settings.
  * @param {Item | null | undefined} item - The item to check.
  * @param {Actor | null | undefined} [actor=item?.actor] - The owning actor.
- * @param {boolean} [applyMetric=true] - Whether to apply the metric multiplier.
+ * @param {boolean} [applyMetric=true] - Whether to apply the metric multiplier for display.
  * @returns {number} Effective item weight.
  */
 function getEffectiveItemWeight(item, actor = item?.actor, applyMetric = true) {
@@ -82,36 +82,45 @@ function getEffectiveItemWeight(item, actor = item?.actor, applyMetric = true) {
         baseWeight = Number(weightSource.value) || 0;
     }
 
+    const { isMetric, multiplier } = getWeightDisplaySettings();
+
+    // If not in a container, return base weight adjusted for display units
     const containerId = foundry.utils.getProperty(item, "system.container");
     if (!actor || !containerId) {
-        return applyMetric ? baseWeight * getWeightDisplaySettings().multiplier : baseWeight;
+        return applyMetric && !isMetric ? baseWeight : baseWeight * multiplier;
     }
 
     const container = actor.items.get(containerId);
     if (!container || !isActualWeightContainer(container)) {
-        return applyMetric ? baseWeight * getWeightDisplaySettings().multiplier : baseWeight;
+        return applyMetric && !isMetric ? baseWeight : baseWeight * multiplier;
     }
 
     const reductionPercent = getWeightReductionPercent(container);
     if (reductionPercent <= 0) {
-        return applyMetric ? baseWeight * getWeightDisplaySettings().multiplier : baseWeight;
+        return applyMetric && !isMetric ? baseWeight : baseWeight * multiplier;
     }
 
-    const multiplier = Math.max(0, 1 - reductionPercent / 100);
-    const effectiveWeight = baseWeight * multiplier;
+    // Apply weight reduction directly to base weight (in kg if metric)
+    const reductionMultiplier = Math.max(0, 1 - reductionPercent / 100);
+    let effectiveWeight = baseWeight * reductionMultiplier;
+
+    // Apply metric multiplier only for display purposes if applyMetric is true
+    if (applyMetric && !isMetric) {
+        effectiveWeight *= multiplier;
+    }
 
     if (isNaN(effectiveWeight)) {
-        console.error(`%c${MODULE_ID} | ERROR getEffectiveItemWeight: NaN detected. Item: ${item?.name}, Base: ${baseWeight}, Multiplier: ${multiplier}`, "color: red; font-weight: bold;");
+        console.error(`%c${MODULE_ID} | ERROR getEffectiveItemWeight: NaN detected. Item: ${item?.name}, Base: ${baseWeight}, Reduction: ${reductionMultiplier}, Metric: ${multiplier}`, "color: red; font-weight: bold;");
         return 0;
     }
-    return applyMetric ? effectiveWeight * getWeightDisplaySettings().multiplier : effectiveWeight;
+    return Number(effectiveWeight.toPrecision(5));
 }
 
 /**
  * Calculates the total current weight of items inside a container.
  * @param {Item | null | undefined} containerItem - The container item document.
  * @param {Actor | null | undefined} actor - The owning actor.
- * @param {boolean} [applyMetric=true] - Whether to apply the metric multiplier.
+ * @param {boolean} [applyMetric=true] - Whether to apply the metric multiplier for display.
  * @returns {number} Total effective weight.
  */
 function calculateCurrentContainerWeight(containerItem, actor, applyMetric = true) {
@@ -162,9 +171,9 @@ function getRarityClassForReduction(reductionPercent) {
 function updateContainerProgressBar(html, containerItem, actor, options = {}) {
     if (!isActualWeightContainer(containerItem) || !actor) return;
 
-    const { multiplier, units } = getWeightDisplaySettings();
+    const { multiplier, units, isMetric } = getWeightDisplaySettings();
     const effectiveCurrentWeight = calculateCurrentContainerWeight(containerItem, actor, true);
-    const containerMaxWeight = Number(foundry.utils.getProperty(containerItem, "system.capacity.weight.value") ?? 0) * multiplier;
+    const containerMaxWeight = Number(foundry.utils.getProperty(containerItem, "system.capacity.weight.value") ?? 0) * (isMetric ? 1 : multiplier);
     if (containerMaxWeight <= 0) return;
 
     const defaultProgressSelectors = game.settings.get(MODULE_ID, "progressSelectors") || [
@@ -323,7 +332,7 @@ Hooks.once('setup', () => {
 function modifyEncumbranceData(actor) {
     if (!actor || !actor.items || !actor.system?.attributes?.encumbrance) return;
 
-    const { multiplier, currencyWeight, currencyDivisor } = getWeightDisplaySettings();
+    const { multiplier, currencyWeight, currencyDivisor, isMetric } = getWeightDisplaySettings();
     let effectiveTotalWeight = 0;
 
     for (const item of actor.items) {
@@ -365,7 +374,7 @@ function modifyEncumbranceData(actor) {
         effectiveTotalWeight += currencyWeightValue;
     }
 
-    const finalEffectiveWeight = Number((effectiveTotalWeight * multiplier).toPrecision(5));
+    const finalEffectiveWeight = Number((effectiveTotalWeight * (isMetric ? 1 : multiplier)).toPrecision(5));
     actor.system.attributes.encumbrance.value = finalEffectiveWeight;
 
     const enc = actor.system.attributes.encumbrance;
@@ -375,7 +384,7 @@ function modifyEncumbranceData(actor) {
 
     if (enc.units !== "%" && typeof enc.max === 'number' && enc.max > 0) {
         let thresholdsConfig = CONFIG.DND5E?.encumbrance?.threshold?.[actor.type] ?? CONFIG.DND5E?.encumbrance?.threshold?.default ?? { light: 1/3, medium: 2/3, heavy: 1 };
-        const baseMax = enc.max * multiplier;
+        const baseMax = enc.max * (isMetric ? 1 : multiplier);
         enc.thresholds = {
             light: baseMax * thresholdsConfig.light,
             medium: baseMax * thresholdsConfig.medium,
@@ -543,8 +552,8 @@ Hooks.on('preCreateItem', (itemDoc, createData, options, userId) => {
     const container = actor.items.get(containerId);
     if (!container || !isActualWeightContainer(container)) return true;
 
-    const { multiplier } = getWeightDisplaySettings();
-    const containerMaxWeight = Number(foundry.utils.getProperty(container, "system.capacity.weight.value") ?? 0) * multiplier;
+    const { multiplier, isMetric } = getWeightDisplaySettings();
+    const containerMaxWeight = Number(foundry.utils.getProperty(container, "system.capacity.weight.value") ?? 0) * (isMetric ? 1 : multiplier);
     if (containerMaxWeight <= 0) return true;
 
     let effectiveWeightToAdd = 0;
@@ -629,8 +638,8 @@ Hooks.on('preUpdateItem', (itemDoc, change, options, userId) => {
     const container = actor.items.get(checkContainerId);
     if (!container || !isActualWeightContainer(container)) return true;
 
-    const { multiplier } = getWeightDisplaySettings();
-    const containerMaxWeight = Number(foundry.utils.getProperty(container, "system.capacity.weight.value") ?? 0) * multiplier;
+    const { multiplier, isMetric } = getWeightDisplaySettings();
+    const containerMaxWeight = Number(foundry.utils.getProperty(container, "system.capacity.weight.value") ?? 0) * (isMetric ? 1 : multiplier);
     if (containerMaxWeight <= 0) return true;
 
     let effectiveSingleItemWeight = 0;
@@ -709,7 +718,7 @@ Hooks.on('renderActorSheet', foundry.utils.debounce((app, html, data) => {
     if (!(app instanceof ActorSheet) || !app.actor || ['npc', 'vehicle'].includes(app.actor.type)) return;
     const actor = app.actor;
 
-    const { units, multiplier } = getWeightDisplaySettings();
+    const { units, multiplier, isMetric } = getWeightDisplaySettings();
     html.find('.inventory-list .item[data-item-id]').each((index, element) => {
         const itemId = element.dataset.itemId;
         if (!itemId) return;
@@ -738,7 +747,7 @@ Hooks.on('renderActorSheet', foundry.utils.debounce((app, html, data) => {
         const weightSource = foundry.utils.getProperty(item, "system.weight");
         let baseWeight = Number(weightSource?.value ?? weightSource ?? 0);
 
-        if (Math.abs(effectiveWeight - (baseWeight * multiplier)) < 0.001) {
+        if (Math.abs(effectiveWeight - (baseWeight * (isMetric ? 1 : multiplier))) < 0.001) {
             existingSpan.remove();
             return;
         }
