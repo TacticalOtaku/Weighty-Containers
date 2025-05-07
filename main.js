@@ -39,9 +39,14 @@ function getWeightReductionPercent(containerItem) {
  * @returns {{ multiplier: number, units: string, currencyWeight: boolean, currencyDivisor: number }}
  */
 function getWeightDisplaySettings() {
-    const isMetric = game.settings.get("dnd5e", "metricWeightUnits") ?? false;
+    let isMetric = false;
+    try {
+        isMetric = game.settings.get("dnd5e", "metricWeightUnits") ?? false;
+    } catch (e) {
+        console.warn(`${MODULE_ID} | Warning: 'dnd5e.metricWeightUnits' setting unavailable, defaulting to imperial units.`, e);
+    }
     const multiplier = isMetric ? 0.5 : 1;
-    const units = isMetric ? (game.settings.get("dnd5e", "metricWeightLabel") || "kg") : game.i18n.localize("DND5E.AbbreviationLbs");
+    const units = isMetric ? "kg" : game.i18n.localize("DND5E.AbbreviationLbs");
     const currencyWeight = game.settings.get("dnd5e", "currencyWeight") ?? true;
     const currencyDivisor = game.settings.get(MODULE_ID, "currencyDivisor") || 50;
     return { multiplier, units, currencyWeight, currencyDivisor };
