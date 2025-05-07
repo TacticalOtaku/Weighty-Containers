@@ -35,14 +35,15 @@ function getWeightReductionPercent(containerItem) {
 }
 
 /**
- * Возвращает множитель и единицы измерения для веса в зависимости от настроек метрической системы.
- * @returns {{ multiplier: number, units: string }}
+ * Возвращает настройки отображения веса на основе конфигурации D&D 5e.
+ * @returns {{ multiplier: number, units: string, currencyWeight: boolean }}
  */
 function getWeightDisplaySettings() {
-    const isMetric = game.settings.get("dnd5e", "metricWeightUnits");
-    const multiplier = isMetric ? (game.settings.get("dnd5e", "metricWeightMultiplier") ?? 0.5) : 1;
+    const isMetric = game.settings.get("dnd5e", "metricWeightUnits") ?? false;
+    const multiplier = isMetric ? 0.5 : 1; // 1 фунт ≈ 0.5 кг
     const units = isMetric ? (game.settings.get("dnd5e", "metricWeightLabel") ?? "kg") : game.i18n.localize("DND5E.AbbreviationLbs");
-    return { multiplier, units };
+    const currencyWeight = game.settings.get("dnd5e", "currencyWeight") ?? true;
+    return { multiplier, units, currencyWeight };
 }
 
 /**
@@ -173,7 +174,7 @@ function updateContainerProgressBar(html, containerItem, actor, options = {}) {
     valueSelectors.forEach(selector => {
         const valueElement = html.find(selector);
         if (valueElement.length > 0) {
-            valueElement.text(`${(effectiveCurrentWeight).toFixed(2)} ${units}`);
+            valueElement.text(`${effectiveCurrentWeight.toFixed(2)} ${units}`);
         }
     });
 }
@@ -267,7 +268,7 @@ function modifyEncumbranceData(actor) {
         return;
     }
 
-    const { multiplier } = getWeightDisplaySettings();
+    const { multiplier, currencyWeight } = getWeightDisplaySettings();
     let effectiveTotalWeight = 0;
     for (const item of actor.items) {
         if (!item.system) continue;
@@ -300,10 +301,12 @@ function modifyEncumbranceData(actor) {
         }
     }
 
-    // Добавляем вес валюты
-    const currency = foundry.utils.getProperty(actor, "system.currency") || {};
-    const currencyWeight = Object.values(currency).reduce((total, amount) => total + (Number(amount) || 0), 0) / 50; // 50 монет = 1 фунт
-    effectiveTotalWeight += currencyWeight;
+    // Добавляем вес валюты, если включено
+    if (currencyWeight) {
+        const currency = foundry.utils.getProperty(actor, "system.currency") || {};
+        const currencyWeightValue = Object.values(currency).reduce((total, amount) => total + (Number(amount) || 0), 0) / 50; // 50 монет = 1 фунт
+        effectiveTotalWeight += currencyWeightValue;
+    }
 
     const finalEffectiveWeight = Number((effectiveTotalWeight * multiplier).toPrecision(5));
     actor.system.attributes.encumbrance.value = finalEffectiveWeight;
@@ -643,7 +646,7 @@ Hooks.on('renderActorSheet', (app, html, data) => {
     if (!(app instanceof ActorSheet) || !app.actor || ['npc', 'vehicle'].includes(app.actor.type)) return;
     const actor = app.actor;
 
-    const { units } = getWeightDisplaySettings();
+    const { units, multiplier } = getWeightDisplaySettings();
     html.find('.inventory-list .item[data-item-id]').each((index, element) => {
         const itemId = element.dataset.itemId;
         if (!itemId) return;
@@ -666,7 +669,7 @@ Hooks.on('renderActorSheet', (app, html, data) => {
         else if (typeof weightSource === 'object' && weightSource !== null && typeof weightSource.value === 'number') baseWeight = weightSource.value;
         baseWeight = Number(baseWeight) || 0;
 
-        if (Math.abs(effectiveWeight - (baseWeight * getWeightDisplaySettings().multiplier)) < 0.001) { existingSpan.remove(); return; }
+        if (Math.abs(effectiveWeight - (baseWeight * multiplier)) < 0.001) { existingSpan.remove(); return; }
 
         if (weightCell.length > 0) {
             const displayWeight = effectiveWeight.toFixed(2);
