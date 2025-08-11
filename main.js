@@ -1,10 +1,113 @@
 class WeightyContainersModule {
     static MODULE_ID = 'weighty-containers';
-    static FLAG_WEIGHT_REDUCTION = 'weightReduction';
 
     constructor() {
         this.libWrapper = undefined;
+    }
+
+    // --- Хуки и инициализация ---
+
+    initialize() {
+        if (game.modules.get('lib-wrapper')?.active) {
+            this.libWrapper = globalThis.libWrapper;
+        }
+        
+        game.settings.register(WeightyContainersModule.MODULE_ID, 'gmOnlyConfig', { name: "WEIGHTYCONTAINERS.SettingGMOnlyConfig", hint: "WEIGHTYCONTAINERS.SettingGMOnlyConfigHint", scope: 'world', config: true, type: Boolean, default: true });
+        game.settings.register(WeightyContainersModule.MODULE_ID, 'capacityExceededMessage', { name: "WEIGHTYCONTAINERS.SettingCapacityMessageName", hint: "WEIGHTYCONTAINERS.SettingCapacityMessageHint", scope: 'world', config: true, type: String, default: "" });
+        game.settings.register(WeightyContainersModule.MODULE_ID, 'currencyDivisor', {
+            name: "WEIGHTYCONTAINERS.SettingCurrencyDivisorName",
+            hint: "WEIGHTYCONTAINERS.SettingCurrencyDivisorHint",
+            scope: 'world',
+            config: true,
+            type: Number,
+            default: 50
+        });
+
         this.registerHooks();
+    }
+
+    registerHooks() {
+        Hooks.once('ready', this.onReady.bind(this));
+        Hooks.on('renderItemSheet', this.onRenderItemSheet.bind(this));
+        Hooks.on('preCreateItem', this.onPreCreateItem.bind(this));
+        Hooks.on('preUpdateItem', this.onPreUpdateItem.bind(this));
+        Hooks.on("updateItem", (item) => foundry.utils.debounce(() => this.refreshActorSheet(item.actor), 200)());
+        Hooks.on("deleteItem", (item) => foundry.utils.debounce(() => this.refreshActorSheet(item.actor), 200)());
+        Hooks.on('renderActorSheet', this.onFirstSheetRender.bind(this));
+    }
+
+    onReady() {
+        if (this.libWrapper) {
+            // Патч для prepareDerivedData для основного пересчета веса
+            this.libWrapper.register(WeightyContainersModule.MODULE_ID, 'CONFIG.Actor.documentClass.prototype.prepareDerivedData', function(wrapped, ...args) {
+                wrapped(...args);
+                try {
+                    if (this.system?.attributes?.encumbrance) {
+                        game.modules.get(WeightyContainersModule.MODULE_ID).api.recalculateEncumbrance(this);
+                    }
+                } catch (e) {
+                    console.error("Weighty Containers | Error during recalculateEncumbrance:", e);
+                }
+            }, 'WRAPPER', { priority: 200 });
+            console.log("Weighty Containers | Patched Actor.prepareDerivedData with LOW priority.");
+            
+            // Оборачиваем методы изменения количества для разных листов персонажей
+            const sheetClasses = new Set();
+            for (const actorType in CONFIG.Actor.sheetClasses) {
+                for (const sheetId in CONFIG.Actor.sheetClasses[actorType]) {
+                    const sheetClass = CONFIG.Actor.sheetClasses[actorType][sheetId].cls;
+                    if (sheetClass) sheetClasses.add(sheetClass);
+                }
+            }
+
+            for (const sheetClass of sheetClasses) {
+                if (typeof sheetClass.prototype._onChangeInputDelta !== 'function') continue;
+                try {
+                    this.libWrapper.register(WeightyContainersModule.MODULE_ID, `${sheetClass.name}.prototype._onChangeInputDelta`, function(wrapped, event) {
+                        const actorSheet = this;
+                        const moduleApi = game.modules.get(WeightyContainersModule.MODULE_ID).api;
+                        const input = event.currentTarget;
+                        const itemId = input.closest(".item")?.dataset.itemId;
+                        if (!itemId) return wrapped(event);
+
+                        const item = actorSheet.actor.items.get(itemId);
+                        const containerId = item?.system.container;
+                        if (!containerId) return wrapped(event);
+                        
+                        const container = actorSheet.actor.items.get(containerId);
+                        if (!moduleApi.isActualWeightContainer(container)) return wrapped(event);
+
+                        const { multiplier } = moduleApi.getWeightDisplaySettings();
+                        const maxWeight = (Number(foundry.utils.getProperty(container, "system.capacity.weight.value")) || 0) * multiplier;
+                        if (maxWeight <= 0) return wrapped(event);
+
+                        const originalQty = item.system.quantity ?? 1;
+                        const newQty = Number(input.value) + Number(input.dataset.delta);
+                        if (newQty < originalQty) return wrapped(event); 
+
+                        const currentWeight = moduleApi.calculateCurrentContainerWeight(container, actorSheet.actor, true);
+                        const effectiveRawWeightPerUnit = moduleApi.getEffectiveItemWeight(item, actorSheet.actor, false);
+                        const weightDelta = (newQty - originalQty) * effectiveRawWeightPerUnit * multiplier;
+                        const finalContainerWeight = currentWeight + weightDelta;
+                        
+                        if (finalContainerWeight > maxWeight + 0.001) {
+                            const message = game.settings.get('weighty-containers', 'capacityExceededMessage') || game.i18n.format("WEIGHTYCONTAINERS.CapacityWouldExceed", { containerName: container.name });
+                            ui.notifications.warn(message.replace('{containerName}', container.name));
+                            input.value = originalQty; 
+                            return; 
+                        }
+                        
+                        return wrapped(event);
+
+                    }, 'MIXED');
+                    console.log(`Weighty Containers | Patched ${sheetClass.name}._onChangeInputDelta.`);
+                } catch (e) {
+                    // Игнорируем ошибки, если какой-то из листов не существует
+                }
+            }
+        } else {
+            console.error("Weighty Containers | libWrapper is not active.");
+        }
     }
 
     // --- Вспомогательные функции ---
@@ -29,7 +132,7 @@ class WeightyContainersModule {
 
     getWeightReductionPercent(containerItem) {
         if (!containerItem) return 0;
-        return Number(containerItem.getFlag(WeightyContainersModule.MODULE_ID, WeightyContainersModule.FLAG_WEIGHT_REDUCTION)) || 0;
+        return Number(containerItem.getFlag(WeightyContainersModule.MODULE_ID, 'weightReduction')) || 0;
     }
 
     getWeightDisplaySettings() {
@@ -39,7 +142,7 @@ class WeightyContainersModule {
         return { multiplier, units };
     }
 
-    getEffectiveItemWeight(item, actor, applyMetric = false) {
+    getEffectiveItemWeight(item, actor) {
         const baseWeight = this._getItemBaseWeight(item);
         const containerId = foundry.utils.getProperty(item, "system.container");
         if (!actor || !containerId) return baseWeight;
@@ -59,7 +162,7 @@ class WeightyContainersModule {
         let currentWeight = 0;
         for (const item of contents) {
             const quantity = Number(foundry.utils.getProperty(item, "system.quantity")) || 1;
-            currentWeight += this.getEffectiveItemWeight(item, actor, false) * quantity;
+            currentWeight += this.getEffectiveItemWeight(item, actor) * quantity;
         }
         const { multiplier } = this.getWeightDisplaySettings();
         return Number((applyMetric ? currentWeight * multiplier : currentWeight).toPrecision(5));
@@ -78,132 +181,20 @@ class WeightyContainersModule {
 
     recalculateEncumbrance(actor) {
         if (!actor.items || !actor.system?.attributes?.encumbrance) return;
-
         let totalWeight = 0;
-
         if (game.settings.get("dnd5e", "currencyWeight")) {
             const currency = actor.system.currency || {};
             const numCoins = Object.values(currency).reduce((acc, val) => acc + (Number(val) || 0), 0);
             const currencyDivisor = game.settings.get(WeightyContainersModule.MODULE_ID, "currencyDivisor") || 50;
             totalWeight += numCoins / currencyDivisor;
         }
-
         for (const item of actor.items) {
             if (foundry.utils.getProperty(item, "system.weightless")) continue;
             const effectiveWeightPerUnit = this.getEffectiveItemWeight(item, actor);
             const quantity = Number(foundry.utils.getProperty(item, "system.quantity")) || 1;
             totalWeight += effectiveWeightPerUnit * quantity;
         }
-        
         actor.system.attributes.encumbrance.value = Number(totalWeight.toPrecision(5));
-    }
-
-    // --- Хуки и инициализация ---
-    
-    initialize() {
-        if (game.modules.get('lib-wrapper')?.active) this.libWrapper = globalThis.libWrapper;
-        
-        game.settings.register(WeightyContainersModule.MODULE_ID, 'gmOnlyConfig', { name: "WEIGHTYCONTAINERS.SettingGMOnlyConfig", hint: "WEIGHTYCONTAINERS.SettingGMOnlyConfigHint", scope: 'world', config: true, type: Boolean, default: true });
-        game.settings.register(WeightyContainersModule.MODULE_ID, 'capacityExceededMessage', { name: "WEIGHTYCONTAINERS.SettingCapacityMessageName", hint: "WEIGHTYCONTAINERS.SettingCapacityMessageHint", scope: 'world', config: true, type: String, default: "" });
-        game.settings.register(WeightyContainersModule.MODULE_ID, 'currencyDivisor', {
-            name: "WEIGHTYCONTAINERS.SettingCurrencyDivisorName",
-            hint: "WEIGHTYCONTAINERS.SettingCurrencyDivisorHint",
-            scope: 'world',
-            config: true,
-            type: Number,
-            default: 50
-        });
-    }
-
-    registerHooks() {
-        Hooks.once('ready', this.onReady.bind(this));
-        Hooks.on('renderItemSheet', this.onRenderItemSheet.bind(this));
-        Hooks.on('preCreateItem', this.onPreCreateItem.bind(this));
-        Hooks.on('preUpdateItem', this.onPreUpdateItem.bind(this));
-        Hooks.on("updateItem", (item) => foundry.utils.debounce(() => this.refreshActorSheet(item.actor), 200)());
-        Hooks.on("deleteItem", (item) => foundry.utils.debounce(() => this.refreshActorSheet(item.actor), 200)());
-        Hooks.on('renderActorSheet', this.onFirstSheetRender.bind(this));
-    }
-
-    onReady() {
-        if (this.libWrapper) {
-            this.libWrapper.register('weighty-containers', 'CONFIG.Actor.documentClass.prototype.prepareDerivedData', function(wrapped, ...args) {
-                wrapped(...args);
-                try {
-                    if (this.system?.attributes?.encumbrance) {
-                        game.modules.get('weighty-containers').object.recalculateEncumbrance(this);
-                    }
-                } catch (e) {
-                    console.error("Weighty Containers | Error during recalculateEncumbrance:", e);
-                }
-            }, 'WRAPPER', { priority: 200 });
-            console.log("Weighty Containers | Patched Actor.prepareDerivedData with LOW priority.");
-            
-            // Оборачиваем методы изменения количества для разных листов персонажей
-            const sheetPaths = [
-                'dnd5e.ActorSheet5eCharacter',
-                'dnd5e.ActorSheet5eNPC'
-            ];
-            
-            // Также поддерживаем популярный модуль Tidy5e Sheet
-            if (game.modules.get('tidy5e-sheet')?.active) {
-                sheetPaths.push('Tidy5eSheet', 'Tidy5eNPC');
-            }
-
-            for (const path of sheetPaths) {
-                try {
-                    // Путь к классу может отличаться в зависимости от версии Foundry/dnd5e
-                    const sheetClass = getProperty(CONFIG.Actor.sheetClasses.character, `${path}.cls`) 
-                                    || getProperty(CONFIG.Actor.sheetClasses.npc, `${path}.cls`) 
-                                    || getProperty(dnd5e.applications.actor, path);
-
-                    if (sheetClass) {
-                        this.libWrapper.register('weighty-containers', `${sheetClass.prototype.constructor.name}.prototype._onChangeInputDelta`, function(wrapped, event) {
-                            const actorSheet = this;
-                            const module = game.modules.get('weighty-containers').object;
-                            const input = event.currentTarget;
-                            const itemId = input.closest(".item")?.dataset.itemId;
-                            if (!itemId) return wrapped(event);
-    
-                            const item = actorSheet.actor.items.get(itemId);
-                            const containerId = item?.system.container;
-                            if (!containerId) return wrapped(event);
-                            
-                            const container = actorSheet.actor.items.get(containerId);
-                            if (!module.isActualWeightContainer(container)) return wrapped(event);
-    
-                            const { multiplier } = module.getWeightDisplaySettings();
-                            const maxWeight = (Number(foundry.utils.getProperty(container, "system.capacity.weight.value")) || 0) * multiplier;
-                            if (maxWeight <= 0) return wrapped(event);
-    
-                            const originalQty = item.system.quantity ?? 1;
-                            const newQty = Number(input.value) + Number(input.dataset.delta);
-                            if (newQty < originalQty) return wrapped(event); 
-    
-                            const currentWeight = module.calculateCurrentContainerWeight(container, actorSheet.actor, true);
-                            const effectiveRawWeightPerUnit = module.getEffectiveItemWeight(item, actorSheet.actor, false);
-                            const weightDelta = (newQty - originalQty) * effectiveRawWeightPerUnit * multiplier;
-                            const finalContainerWeight = currentWeight + weightDelta;
-                            
-                            if (finalContainerWeight > maxWeight + 0.001) {
-                                const message = game.settings.get('weighty-containers', 'capacityExceededMessage') || game.i18n.format("WEIGHTYCONTAINERS.CapacityWouldExceed", { containerName: container.name });
-                                ui.notifications.warn(message.replace('{containerName}', container.name));
-                                input.value = originalQty; 
-                                return; 
-                            }
-                            
-                            return wrapped(event);
-    
-                        }, 'MIXED');
-                        console.log(`Weighty Containers | Patched ${path}._onChangeInputDelta.`);
-                    }
-                } catch (e) {
-                    // Игнорируем ошибки
-                }
-            }
-        } else {
-            console.error("Weighty Containers | libWrapper is not active.");
-        }
     }
 
     onRenderItemSheet(app, html, data) {
@@ -240,7 +231,7 @@ class WeightyContainersModule {
                     callback: async (html) => {
                         const newPercentage = parseInt(html.find('[name="reductionPercent"]').val(), 10);
                         if (isNaN(newPercentage) || newPercentage < 0 || newPercentage > 100) return ui.notifications.warn(game.i18n.localize("WEIGHTYCONTAINERS.InvalidPercentage"));
-                        await item.setFlag(this.constructor.MODULE_ID, 'weightReduction', newPercentage);
+                        await item.setFlag(WeightyContainersModule.MODULE_ID, 'weightReduction', newPercentage);
                         if (item.actor) this.refreshActorSheet(item.actor);
                     }
                 },
@@ -251,27 +242,19 @@ class WeightyContainersModule {
     }
     
     updateContainerProgressBar(html, containerItem, actor) {
-        const { multiplier, units } = this.getWeightDisplaySettings();
+        const { multiplier } = this.getWeightDisplaySettings();
         const currentWeight = this.calculateCurrentContainerWeight(containerItem, actor, true);
         const maxWeight = (Number(foundry.utils.getProperty(containerItem, "system.capacity.weight.value")) || 0) * multiplier;
         if (maxWeight <= 0) return;
         const percentage = Math.min(100, Math.round((currentWeight / maxWeight) * 100));
         const newText = `${currentWeight.toFixed(1)} / ${maxWeight.toFixed(1)}`;
-        const barSelectors = [
-            '.tab[data-tab="contents"] .encumbrance .meter.progress',
-            '.tab[data-tab="contents"] .encumbrance-bar'
-        ];
+        const barSelectors = [ '.tab[data-tab="contents"] .encumbrance .meter.progress', '.tab[data-tab="contents"] .encumbrance-bar' ];
         const barElement = html.find(barSelectors.join(', '));
         if (barElement.length > 0) {
             barElement.css('--bar-percentage', `${percentage}%`);
-            const textContainerSelectors = [
-                '.tab[data-tab="contents"] .encumbrance .label',
-                '.tab[data-tab="contents"] .encumbrance-label'
-            ];
+            const textContainerSelectors = [ '.tab[data-tab="contents"] .encumbrance .label', '.tab[data-tab="contents"] .encumbrance-label' ];
             const textContainer = html.find(textContainerSelectors.join(', '));
-            if (textContainer.length > 0) {
-                textContainer.text(newText);
-            }
+            if (textContainer.length > 0) textContainer.text(newText);
         }
     }
 
@@ -286,11 +269,11 @@ class WeightyContainersModule {
         if (maxWeight <= 0) return true;
         const currentWeight = this.calculateCurrentContainerWeight(container, actor, true);
         const tempItem = new Item(foundry.utils.mergeObject(itemDoc.toObject(false), createData), { temporary: true });
-        const rawWeightPerUnit = this.getEffectiveItemWeight(tempItem, actor, false);
+        const rawWeightPerUnit = this.getEffectiveItemWeight(tempItem, actor);
         const quantity = Number(foundry.utils.getProperty(tempItem, "system.quantity")) || 1;
         const weightToAdd = (rawWeightPerUnit * quantity) * multiplier;
         if (currentWeight + weightToAdd > maxWeight + 0.001) {
-            const message = game.settings.get(this.constructor.MODULE_ID, 'capacityExceededMessage') || game.i18n.format("WEIGHTYCONTAINERS.CapacityWouldExceed", { containerName: container.name });
+            const message = game.settings.get(WeightyContainersModule.MODULE_ID, 'capacityExceededMessage') || game.i18n.format("WEIGHTYCONTAINERS.CapacityWouldExceed", { containerName: container.name });
             ui.notifications.warn(message.replace('{containerName}', container.name));
             return false;
         }
@@ -298,8 +281,9 @@ class WeightyContainersModule {
     }
     
     onPreUpdateItem(itemDoc, change, options, userId) {
+        if (options.weighyContainerChecked) return true;
         const actor = itemDoc.parent;
-        if (!actor || !(actor instanceof Actor) || options.weighyContainerChecked) return true;
+        if (!actor || !(actor instanceof Actor)) return true;
         const targetContainerId = foundry.utils.getProperty(change, 'system.container') ?? itemDoc.system.container;
         if (!targetContainerId) return true;
         const container = actor.items.get(targetContainerId);
@@ -312,11 +296,11 @@ class WeightyContainersModule {
             const currentWeightInNewContainer = this.calculateCurrentContainerWeight(container, actor, true);
             const tempChangedItemData = foundry.utils.mergeObject(itemDoc.toObject(false), change);
             const tempChangedItemDoc = new Item(tempChangedItemData, { temporary: true });
-            const rawWeightPerUnit = this.getEffectiveItemWeight(tempChangedItemDoc, actor, false);
+            const rawWeightPerUnit = this.getEffectiveItemWeight(tempChangedItemDoc, actor);
             const quantity = Number(foundry.utils.getProperty(tempChangedItemDoc, "system.quantity")) || 1;
             const weightToAdd = (rawWeightPerUnit * quantity) * multiplier;
             if (currentWeightInNewContainer + weightToAdd > maxWeight + 0.001) {
-                const message = game.settings.get(this.constructor.MODULE_ID, 'capacityExceededMessage') || game.i18n.format("WEIGHTYCONTAINERS.CapacityWouldExceed", { containerName: container.name });
+                const message = game.settings.get(WeightyContainersModule.MODULE_ID, 'capacityExceededMessage') || game.i18n.format("WEIGHTYCONTAINERS.CapacityWouldExceed", { containerName: container.name });
                 ui.notifications.warn(message.replace('{containerName}', container.name));
                 return false;
             }
@@ -325,11 +309,11 @@ class WeightyContainersModule {
             const originalQty = itemDoc.system.quantity ?? 1;
             const newQty = foundry.utils.getProperty(change, 'system.quantity') ?? originalQty;
             if (newQty <= originalQty) return true;
-            const effectiveRawWeightPerUnit = this.getEffectiveItemWeight(itemDoc, actor, false);
+            const effectiveRawWeightPerUnit = this.getEffectiveItemWeight(itemDoc, actor);
             const weightDelta = (newQty - originalQty) * effectiveRawWeightPerUnit * multiplier;
             const finalContainerWeight = currentWeight + weightDelta;
             if (finalContainerWeight > maxWeight + 0.001) {
-                const message = game.settings.get(this.constructor.MODULE_ID, 'capacityExceededMessage') || game.i18n.format("WEIGHTYCONTAINERS.CapacityWouldExceed", { containerName: container.name });
+                const message = game.settings.get(WeightyContainersModule.MODULE_ID, 'capacityExceededMessage') || game.i18n.format("WEIGHTYCONTAINERS.CapacityWouldExceed", { containerName: container.name });
                 ui.notifications.warn(message.replace('{containerName}', container.name));
                 return false;
             }
@@ -344,27 +328,22 @@ class WeightyContainersModule {
     }
     
     onFirstSheetRender(app) {
-        if (!(app.object instanceof Actor) || app._weightyContainersCorrected) {
-            return;
-        }
+        if (!(app.object instanceof Actor) || app._weightyContainersCorrected) return;
         const actor = app.object;
-        if (!actor.system?.attributes?.encumbrance) {
-            return;
-        }
+        if (!actor.system?.attributes?.encumbrance) return;
         app._weightyContainersCorrected = true;
         setTimeout(() => {
             if (!app.rendered) return;
             console.log(`Weighty Containers | Triggering data recalculation for ${actor.name} to correct initial weight.`);
-            actor.update({ [`flags.${this.constructor.MODULE_ID}.refresh`]: Math.random() });
+            actor.update({ [`flags.${WeightyContainersModule.MODULE_ID}.refresh`]: Math.random() });
         }, 100);
     }
 }
 
-// >>> ИСПРАВЛЕНИЕ v9: Вся инициализация модуля перенесена в хук 'init'
+// >>> ИСПРАВЛЕНИЕ v10: Вся инициализация модуля перенесена в хук 'init'
 Hooks.once('init', () => {
-    const module = new WeightyContainersModule();
-    module.initialize();
-    game.modules.set('weighty-containers', {
-        object: module
-    });
+    const module_api = new WeightyContainersModule();
+    module_api.initialize();
+    // Регистрируем API модуля для доступа из других частей кода
+    game.modules.get('weighty-containers').api = module_api;
 });
