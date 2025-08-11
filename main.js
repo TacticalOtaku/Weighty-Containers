@@ -142,7 +142,6 @@ class WeightyContainersModule {
                 }
             }, 
             'WRAPPER',
-            // >>> ИСПРАВЛЕНИЕ v6: Заменяем символическое имя на числовое значение
             { priority: 200 } // Большое число = низкий приоритет
             );
             console.log("Weighty Containers | Patched Actor.prepareDerivedData with LOW priority. Module is active.");
@@ -240,39 +239,81 @@ class WeightyContainersModule {
         return true;
     }
     
+    /**
+     * ---- START OF REPLACEMENT ----
+     * This function is completely replaced with correct logic.
+     */
     onPreUpdateItem(itemDoc, change, options, userId) {
         const actor = itemDoc.parent;
         if (!actor || !(actor instanceof Actor)) return true;
-        const targetContainerId = foundry.utils.getProperty(change, 'system.container') ?? itemDoc.system.container;
-        if (!targetContainerId) return true;
-        const container = actor.items.get(targetContainerId);
+
+        const hasContainerChange = foundry.utils.hasProperty(change, "system.container");
+        const hasQuantityChange = foundry.utils.hasProperty(change, "system.quantity");
+
+        // If neither container nor quantity is changing, no need to check capacity.
+        if (!hasContainerChange && !hasQuantityChange) return true;
+
+        // Determine which container's capacity we need to check.
+        // If the container property is being changed, we check the new container.
+        // If only the quantity is changing, we check the item's current container.
+        const containerIdToCheck = hasContainerChange 
+            ? foundry.utils.getProperty(change, "system.container")
+            : itemDoc.system.container;
+
+        // If there's no container to check (e.g., item is being moved to the main inventory),
+        // then no check is needed. This is the key fix.
+        if (!containerIdToCheck) return true;
+
+        const container = actor.items.get(containerIdToCheck);
+
+        // If the target isn't a valid weight-based container, no check is needed.
         if (!this.isActualWeightContainer(container)) return true;
+
         const { multiplier } = this.getWeightDisplaySettings();
         const maxWeight = (Number(foundry.utils.getProperty(container, "system.capacity.weight.value")) || 0) * multiplier;
+        
+        // If the container has no weight limit, no check is needed.
         if (maxWeight <= 0) return true;
-        const currentWeight = this.calculateCurrentContainerWeight(container, actor, true);
+
+        const currentWeightInContainer = this.calculateCurrentContainerWeight(container, actor, true);
         const originalQty = itemDoc.system.quantity ?? 1;
-        const isMoving = foundry.utils.hasProperty(change, 'system.container') && targetContainerId !== itemDoc.system.container;
+        
+        // isMoving is true if the item is coming from a DIFFERENT location into the container we are checking.
+        const isMoving = hasContainerChange && containerIdToCheck !== itemDoc.system.container;
+        
         const tempChangedItemData = foundry.utils.mergeObject(itemDoc.toObject(false), change);
         const tempChangedItemDoc = new Item(tempChangedItemData, { temporary: true });
+        
+        // This calculates the item's weight as if it were inside the target container.
         const effectiveSingleWeight = this.getEffectiveItemWeight(tempChangedItemDoc, actor, true);
+        
         let finalContainerWeight;
+
         if (isMoving) {
+            // Logic for adding a new item to this container.
             const newQty = tempChangedItemDoc.system.quantity ?? 1;
-            finalContainerWeight = currentWeight + (effectiveSingleWeight * newQty);
+            // The final weight is the current weight PLUS the full weight of the new item.
+            finalContainerWeight = currentWeightInContainer + (effectiveSingleWeight * newQty);
         } else {
+            // Logic for changing the quantity of an item already in this container.
             const newQty = foundry.utils.getProperty(change, 'system.quantity') ?? originalQty;
             const originalEffectiveWeight = this.getEffectiveItemWeight(itemDoc, actor, true);
             const weightDelta = (newQty * effectiveSingleWeight) - (originalQty * originalEffectiveWeight);
-            finalContainerWeight = currentWeight + weightDelta;
+            // The final weight is the current weight PLUS the change in the item's weight.
+            finalContainerWeight = currentWeightInContainer + weightDelta;
         }
+
         if (finalContainerWeight > maxWeight + 0.001) {
-             const message = game.settings.get(this.constructor.MODULE_ID, 'capacityExceededMessage') || game.i18n.format("WEIGHTYCONTAINERS.CapacityWouldExceed", { containerName: container.name });
+            const message = game.settings.get(this.constructor.MODULE_ID, 'capacityExceededMessage') || game.i18n.format("WEIGHTYCONTAINERS.CapacityWouldExceed", { containerName: container.name });
             ui.notifications.warn(message.replace('{containerName}', container.name));
             return false;
         }
+
         return true;
     }
+    /**
+     * ---- END OF REPLACEMENT ----
+     */
 
     refreshActorSheet(actor) {
         if (actor?.sheet?.rendered) {
