@@ -1,14 +1,7 @@
-// weighty-containers — v0.2.9
-// Author: TacticalOtaku
-// Patched to correctly override actor encumbrance
-// Added socketlib support for multiplayer synchronization
-// Updated to use libWrapper for compatibility with midi-qol
-// Adjusted for dnd5e 5.1.8 compatibility (removed _computeContentsWeight patch)
-// Fixed null parent error in openReductionDialog
-
 import { SocketlibSocket } from "./socketlib-socket.js";
 
 const MODULE_ID = "weighty-containers";
+const LBS_PER_KG = 2.20462; // Static conversion factor for reliability
 
 /* ============== Logging ============== */
 const LOG_LEVELS = ["off", "error", "warn", "info", "debug", "trace"];
@@ -64,6 +57,35 @@ const LOG = new WCLogger();
 
 /* ============== Small utils ============== */
 const jq = (el) => (el instanceof jQuery ? el : $(el ?? [])); // wrap safe
+
+/* ============== Unit Conversion Utils ============== */
+function getSystemWeightUnit() {
+  return game.settings.get("dnd5e", "metricWeightUnits") ? "kg" : "lb";
+}
+
+function convertWeightToLbs(value, unit) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  // If unit is not specified, assume it's in the system's default unit
+  const u = String(unit || getSystemWeightUnit()).toLowerCase();
+
+  switch (u) {
+    case "lb":
+    case "lbs":
+      return n;
+    case "kg":
+    case "kgs":
+    case "kilogram":
+    case "kilograms":
+      return n * LBS_PER_KG;
+    case "oz":
+    case "ounce":
+    case "ounces":
+      return n / 16;
+    default:
+      return n;
+  }
+}
 
 /* ============== Settings ============== */
 Hooks.once("init", () => {
@@ -180,15 +202,20 @@ Hooks.once("ready", () => {
         // Check if this actor has an encumbrance attribute
         if (!this.system?.attributes?.encumbrance) return;
 
-        // Use the module's function to calculate the adjusted weight
-        const adjustedWeight = computeActorAdjustedCarried(this);
+        // Use the module's function to calculate the adjusted weight in LBS
+        const adjustedWeightLbs = computeActorAdjustedCarried(this);
         const enc = this.system.attributes.encumbrance;
 
-        // Overwrite the system's value with our calculated value
-        enc.value = adjustedWeight;
+        // Check if the system is using metric units for display
+        const isMetric = game.settings.get("dnd5e", "metricWeightUnits");
+        const finalDisplayWeight = isMetric ? adjustedWeightLbs / LBS_PER_KG : adjustedWeightLbs;
+        
+        // Round the final value to 2 decimal places for clean display.
+        enc.value = Number(finalDisplayWeight.toFixed(2));
 
-        // Also recalculate the percentage for the encumbrance bar
-        enc.pct = enc.max > 0 ? Math.round((adjustedWeight / enc.max) * 100) : 0;
+        // The percentage for the encumbrance bar MUST still be calculated from LBS,
+        // because enc.max is ALWAYS in LBS regardless of settings.
+        enc.pct = enc.max > 0 ? Math.round((adjustedWeightLbs / enc.max) * 100) : 0;
       } catch (e) {
         LOG.error("Failed to patch actor encumbrance", { actor: this.name, e });
       }
@@ -269,7 +296,11 @@ async function notifyExceedRemote(data) {
 function num(v, d = 0) { const n = Number(v); return Number.isFinite(n) ? n : d; }
 function qty(doc) { return num(doc?.system?.quantity, 1); }
 function unitW(doc) { const w = (doc?.system?.weight?.value ?? doc?.system?.weight); return num(w, 0); }
-function ownWeight(doc) { return unitW(doc) * qty(doc); }
+
+// Returns the item's own weight in LBS, regardless of system settings
+function ownWeightLbs(doc) {
+  return convertWeightToLbs(unitW(doc), doc?.system?.weight?.units) * qty(doc);
+}
 function getItem(actor, id) { return actor?.items?.get?.(id) ?? null; }
 function isContainer(i) { return i?.type === "container"; }
 
@@ -290,49 +321,37 @@ function getReductionPct(containerItem) {
   return Math.max(0, Math.min(100, Math.round(v)));
 }
 
-function getCapacity(containerItem) {
+// Always returns capacity in LBS
+function getCapacityLbs(containerItem) {
   const cap = containerItem?.system?.capacity;
-  if (cap == null) {
-    LOG.warn("capacity missing", { item: containerItem?.name, id: containerItem?.id });
+  if (!cap) {
+    LOG.warn("capacity data missing", { item: containerItem?.name, id: containerItem?.id });
     return null;
   }
-  const toLb = (v, u) => {
-    const units = String(u ?? "lb").toLowerCase();
-    const n = Number(v);
-    if (!Number.isFinite(n)) return null;
-    switch (units) {
-      case "lb":
-      case "lbs":
-        return n;
-      case "kg":
-      case "kgs":
-      case "kilogram":
-      case "kilograms":
-        return n * 2.20462262;
-      case "oz":
-      case "ounce":
-      case "ounces":
-        return n / 16;
-      default:
-        return n;
-    }
-  };
-  if (typeof cap === "number") return cap > 0 ? cap : null;
-  if (Number.isFinite(Number(cap.value))) {
-    const val = toLb(cap.value, cap.units);
-    if (val != null && val > 0) return val;
+  
+  // Standard dnd5e capacity object { value, units }
+  if (cap.value != null && Number.isFinite(Number(cap.value))) {
+    const valLbs = convertWeightToLbs(cap.value, cap.units);
+    if (valLbs > 0) return valLbs;
   }
-  if (cap?.weight && Number.isFinite(Number(cap.weight.value))) {
-    const val = toLb(cap.weight.value, cap.weight.units);
-    if (val != null && val > 0) return val;
+
+  // Fallback for older dnd5e versions or custom items
+  if (cap?.weight?.value != null && Number.isFinite(Number(cap.weight.value))) {
+    const valLbs = convertWeightToLbs(cap.weight.value, cap.weight.units);
+    if (valLbs > 0) return valLbs;
   }
+  
+  // Fallback for a simple numeric capacity
+  if (typeof cap === "number" && cap > 0) return cap;
+
   const flagged = Number(containerItem?.flags?.dnd5e?.capacity);
   if (Number.isFinite(flagged) && flagged > 0) return flagged;
+
   LOG.warn("capacity not found or non-positive", { item: containerItem?.name, id: containerItem?.id, capShape: cap });
   return null;
 }
 
-/* ============== Loads math ============== */
+/* ============== Loads math (all calculations in LBS) ============== */
 function computeAdjustedLoadWithTrace(actor, containerId) {
   const includeNested = game.settings.get(MODULE_ID, "includeNested");
   const trace = [];
@@ -343,62 +362,75 @@ function computeAdjustedLoadWithTrace(actor, containerId) {
   let load = 0;
   const children = by.get(containerId) ?? [];
   for (const ch of children) {
-    const w = ownWeight(ch);
+    const wLbs = ownWeightLbs(ch);
     if (isContainer(ch)) {
-      const addItem = w * (1 - parentRed);
+      const addItem = wLbs * (1 - parentRed);
       load += addItem;
-      trace.push({ child: ch.name, id: ch.id, type: "container(item)", wOwn: w, reducedBy: parentRed, added: addItem });
+      trace.push({ child: ch.name, id: ch.id, type: "container(item)", wOwnLbs: wLbs, reducedBy: parentRed, added: addItem });
       if (includeNested) {
         const sub = computeAdjustedLoadWithTrace(actor, ch.id);
         load += sub.load;
         trace.push({ child: ch.name, id: ch.id, type: "container(contents)", nestedAdded: sub.load });
       }
     } else {
-      const add = w * (1 - parentRed);
+      const add = wLbs * (1 - parentRed);
       load += add;
-      trace.push({ child: ch.name, id: ch.id, type: "item", wOwn: w, reducedBy: parentRed, added: add });
+      trace.push({ child: ch.name, id: ch.id, type: "item", wOwnLbs: wLbs, reducedBy: parentRed, added: add });
     }
   }
-  return { load: Math.max(0, +load.toFixed(3)), trace };
+  return { load: Math.max(0, +load.toFixed(5)), trace };
 }
 function computeAdjustedLoad(actor, cid) { return computeAdjustedLoadWithTrace(actor, cid).load; }
 
+// Returns total actor carried weight in LBS
 function computeActorAdjustedCarried(actor) {
   if (!actor) return 0;
   let total = 0;
   for (const it of actor.items ?? []) {
     if (it?.system?.container) continue; // top-level only
     if (isContainer(it)) {
-      total += ownWeight(it);
+      total += ownWeightLbs(it);
       total += computeAdjustedLoad(actor, it.id);
     } else {
-      total += ownWeight(it);
+      total += ownWeightLbs(it);
     }
   }
-  return Math.max(0, +total.toFixed(3));
+  return Math.max(0, +total.toFixed(5));
 }
 
 /* ============== Messaging (non-critical) ============== */
 const fmt2 = n => Number(n).toFixed(2);
-function makeMessage({ actorName, containerName, capacity, before, delta }) {
+function makeMessage({ containerName, capacityLbs, beforeLbs, deltaLbs }) {
   const custom = (game.settings.get(MODULE_ID, "exceedMessageText") ?? "").toString().trim();
   if (custom) return custom;
-  return game.i18n.format("weighty-containers.exceedMessage.default", {
+  
+  const isMetric = getSystemWeightUnit() === 'kg';
+  const convert = (val) => isMetric ? val / LBS_PER_KG : val;
+
+  const translationKey = isMetric
+    ? "weighty-containers.exceedMessage.default_kg"
+    : "weighty-containers.exceedMessage.default";
+    
+  const fallback = isMetric
+    ? `[${containerName ?? "Контейнер"}] Превышена вместимость: ${fmt2(convert(beforeLbs))} + ${fmt2(convert(deltaLbs))} > ${fmt2(convert(capacityLbs))} кг`
+    : `[${containerName ?? "Container"}] Capacity exceeded: ${fmt2(beforeLbs)} + ${fmt2(deltaLbs)} > ${fmt2(capacityLbs)} lb`;
+
+  return game.i18n.format(translationKey, {
     containerName: containerName ?? "Container",
-    before: fmt2(before),
-    delta: fmt2(delta),
-    capacity: fmt2(capacity)
-  }) || `[${containerName ?? "Container"}] Capacity exceeded: ${fmt2(before)} + ${fmt2(delta)} > ${fmt2(capacity)} lb`;
+    before: fmt2(convert(beforeLbs)),
+    delta: fmt2(convert(deltaLbs)),
+    capacity: fmt2(convert(capacityLbs))
+  }) || fallback;
 }
-function notifyExceed({ actorName, containerName, capacity, before, delta, extra }) {
-  const msg = makeMessage({ actorName, containerName, capacity, before, delta });
-  // Use socket to notify all clients if available
+
+function notifyExceed({ actorName, containerName, capacityLbs, beforeLbs, deltaLbs, extra }) {
+  const msg = makeMessage({ containerName, capacityLbs, beforeLbs, deltaLbs });
   if (window.wcSocket) {
-    window.wcSocket.executeForEveryone("notifyExceedRemote", { msg, actorName, containerName, capacity, before, delta, ...extra });
+    window.wcSocket.executeForEveryone("notifyExceedRemote", { msg, actorName, containerName, capacityLbs, beforeLbs, deltaLbs, ...extra });
   } else {
     ui.notifications?.warn(msg);
   }
-  LOG.info("exceed", { actorName, containerName, capacity, before, delta, after: before + delta, ...extra });
+  LOG.info("exceed", { actorName, containerName, capacityLbs, beforeLbs, deltaLbs, after: beforeLbs + deltaLbs, ...extra });
   return msg;
 }
 
@@ -409,18 +441,19 @@ function enforceCapacityOnCreate(item, data) {
   if (!actor || !containerId) return;
   const container = getItem(actor, containerId);
   if (!container) return;
-  const capacity = getCapacity(container);
-  if (!capacity) return;
+  const capacityLbs = getCapacityLbs(container);
+  if (!capacityLbs) return;
 
-  const { load: current, trace } = computeAdjustedLoadWithTrace(actor, containerId);
+  const { load: currentLbs, trace } = computeAdjustedLoadWithTrace(actor, containerId);
   const parentRed = getReductionPct(container) / 100;
+  
   const unit = num(data?.system?.weight?.value ?? data?.system?.weight, 0);
   const q = num(data?.system?.quantity, 1);
-  const delta = unit * q * (1 - parentRed);
+  const deltaLbs = convertWeightToLbs(unit * q, data?.system?.weight?.units) * (1 - parentRed);
 
-  LOG.debug("preCreate check (adjusted)", { actor: actor?.name, container: container?.name, capacity, current, unit, qty: q, parentRed, delta, trace });
-  if (current + delta > capacity) {
-    notifyExceed({ actorName: actor?.name, containerName: container?.name, capacity, before: current, delta, extra: { trace } });
+  LOG.debug("preCreate check (adjusted)", { actor: actor?.name, container: container?.name, capacityLbs, currentLbs, unit, qty: q, parentRed, deltaLbs, trace });
+  if (currentLbs + deltaLbs > capacityLbs) {
+    notifyExceed({ actorName: actor?.name, containerName: container?.name, capacityLbs, beforeLbs: currentLbs, deltaLbs, extra: { trace } });
     if (game.settings.get(MODULE_ID, "enforceMode") === "block") return false;
   }
 }
@@ -435,14 +468,14 @@ function enforceCapacityOnUpdate(item, changes) {
     const newQty = num(changes.system.quantity, qty(item)), oldQty = qty(item);
     if (newQty > oldQty) {
       const container = getItem(actor, will);
-      const capacity = getCapacity(container);
-      if (capacity) {
-        const { load: current, trace } = computeAdjustedLoadWithTrace(actor, will);
+      const capacityLbs = getCapacityLbs(container);
+      if (capacityLbs) {
+        const { load: currentLbs, trace } = computeAdjustedLoadWithTrace(actor, will);
         const parentRed = getReductionPct(container) / 100;
-        const delta = (newQty - oldQty) * unitW(item) * (1 - parentRed);
-        LOG.debug("preUpdate qty++ check (adjusted)", { container: container?.name, capacity, current, parentRed, delta, trace });
-        if (current + delta > capacity) {
-          notifyExceed({ actorName: actor?.name, containerName: container?.name, capacity, before: current, delta, extra: { trace } });
+        const deltaLbs = (newQty - oldQty) * convertWeightToLbs(unitW(item), item?.system?.weight?.units) * (1 - parentRed);
+        LOG.debug("preUpdate qty++ check (adjusted)", { container: container?.name, capacityLbs, currentLbs, parentRed, deltaLbs, trace });
+        if (currentLbs + deltaLbs > capacityLbs) {
+          notifyExceed({ actorName: actor?.name, containerName: container?.name, capacityLbs, beforeLbs: currentLbs, deltaLbs, extra: { trace } });
           if (game.settings.get(MODULE_ID, "enforceMode") === "block") return false;
         }
       }
@@ -453,19 +486,19 @@ function enforceCapacityOnUpdate(item, changes) {
   if (will && will !== was) {
     const dest = getItem(actor, will);
     if (dest) {
-      const capacity = getCapacity(dest);
-      if (capacity) {
-        const { load: current, trace } = computeAdjustedLoadWithTrace(actor, will);
+      const capacityLbs = getCapacityLbs(dest);
+      if (capacityLbs) {
+        const { load: currentLbs, trace } = computeAdjustedLoadWithTrace(actor, will);
         const destRed = getReductionPct(dest) / 100;
-        let delta = ownWeight(item) * (1 - destRed);
+        let deltaLbs = ownWeightLbs(item) * (1 - destRed);
         if (game.settings.get(MODULE_ID, "includeNested")) {
           const sub = computeAdjustedLoadWithTrace(actor, item.id);
-          delta += sub.load;
+          deltaLbs += sub.load;
           trace.push({ movingContainerContents: item.name, id: item.id, added: sub.load });
         }
-        LOG.debug("preUpdate move check (adjusted)", { dest: dest?.name, capacity, current, delta, destRed, trace });
-        if (current + delta > capacity) {
-          notifyExceed({ actorName: actor?.name, containerName: dest?.name, capacity, before: current, delta, extra: { trace } });
+        LOG.debug("preUpdate move check (adjusted)", { dest: dest?.name, capacityLbs, currentLbs, deltaLbs, destRed, trace });
+        if (currentLbs + deltaLbs > capacityLbs) {
+          notifyExceed({ actorName: actor?.name, containerName: dest?.name, capacityLbs, beforeLbs: currentLbs, deltaLbs, extra: { trace } });
           if (game.settings.get(MODULE_ID, "enforceMode") === "block") return false;
         }
       }
@@ -478,16 +511,16 @@ function enforceCapacityOnUpdate(item, changes) {
   const wChange = (changes?.system?.weight?.value ?? changes?.system?.weight);
   if (wChange != null && was) {
     const container = getItem(actor, was);
-    const capacity = getCapacity(container);
-    if (capacity) {
-      const { load: current, trace } = computeAdjustedLoadWithTrace(actor, was);
+    const capacityLbs = getCapacityLbs(container);
+    if (capacityLbs) {
+      const { load: currentLbs, trace } = computeAdjustedLoadWithTrace(actor, was);
       const parentRed = getReductionPct(container) / 100;
-      const oldTotal = ownWeight(item) * (1 - parentRed);
-      const newTotal = num(wChange, unitW(item)) * qty(item) * (1 - parentRed);
-      const delta = Math.max(0, newTotal - oldTotal);
-      LOG.debug("preUpdate weight++ check (adjusted)", { container: container?.name, capacity, current, oldTotal, newTotal, delta, parentRed, trace });
-      if (delta > 0 && current + delta > capacity) {
-        notifyExceed({ actorName: actor?.name, containerName: container?.name, capacity, before: current, delta, extra: { trace } });
+      const oldTotalLbs = ownWeightLbs(item) * (1 - parentRed);
+      const newTotalLbs = convertWeightToLbs(num(wChange, unitW(item)) * qty(item), item?.system?.weight?.units) * (1 - parentRed);
+      const deltaLbs = Math.max(0, newTotalLbs - oldTotalLbs);
+      LOG.debug("preUpdate weight++ check (adjusted)", { container: container?.name, capacityLbs, currentLbs, oldTotalLbs, newTotalLbs, deltaLbs, parentRed, trace });
+      if (deltaLbs > 0 && currentLbs + deltaLbs > capacityLbs) {
+        notifyExceed({ actorName: actor?.name, containerName: container?.name, capacityLbs, beforeLbs: currentLbs, deltaLbs, extra: { trace } });
         if (game.settings.get(MODULE_ID, "enforceMode") === "block") return false;
       }
     }
@@ -510,17 +543,16 @@ function repaintContainerBars(app, htmlEl) {
   const item = app?.document ?? app?.item ?? app?.object;
   if (!(item instanceof Item) || item.type !== "container") return;
 
-  const capacity = getCapacity(item);
-  if (!capacity) {
+  const capacityLbs = getCapacityLbs(item);
+  if (!capacityLbs) {
     LOG.debug("container has no capacity UI to repaint");
     return;
   }
-  const { load } = computeAdjustedLoadWithTrace(item.parent, item.id);
-  const pct = Math.max(0, Math.min(100, Math.round((load / capacity) * 100)));
+  const { load: loadLbs } = computeAdjustedLoadWithTrace(item.parent, item.id);
+  const pct = Math.max(0, Math.min(100, Math.round((loadLbs / capacityLbs) * 100)));
 
   const $html = jq(htmlEl);
 
-  // 1) obvious capacity blocks with bars
   const blocks = $html.find(`
     .capacity, .item-capacity, .resource.capacity, .dnd5e-capacity,
     [data-resource="capacity"], [data-section*="capacity"], section.capacity,
@@ -532,7 +564,7 @@ function repaintContainerBars(app, htmlEl) {
     if (host) return;
     const $el = jq(el);
     const text = ($el.text() || "").toLowerCase();
-    const looks = /capacity|вместим|ёмк|weight|вес|lb|lbs|kg/.test(text);
+    const looks = /capacity|вместим|ёмк|weight|вес|lb|lbs|kg|кг/.test(text);
     const b = $el.find('.bar, .progress-bar, .meter-bar, .fill, .value, .pct, [role="progressbar"]').first();
     if (looks && b.length) {
       host = $el;
@@ -541,10 +573,11 @@ function repaintContainerBars(app, htmlEl) {
     }
   });
 
-  // 2) fallback — search any element whose TEXT contains "X / Y" with Y≈capacity (closest/shortest)
   if (!host) {
+    const isMetric = getSystemWeightUnit() === 'kg';
+    const capacityDisplay = isMetric ? capacityLbs / LBS_PER_KG : capacityLbs;
     const rx = /([0-9]+(?:[.,][0-9]+)?)\s*\/\s*([0-9]+(?:[.,][0-9]+)?)/;
-    let bestEl = null, bestLen = 1e9, bestMatch = null;
+    let bestEl = null, bestLen = 1e9;
 
     $html.find("*").each((i, el) => {
       const $el = jq(el);
@@ -554,12 +587,11 @@ function repaintContainerBars(app, htmlEl) {
       if (!m) return;
       const max = Number(m[2].replace(',', '.'));
       if (!Number.isFinite(max)) return;
-      if (Math.abs(max - capacity) < 0.01) {
+      if (Math.abs(max - capacityDisplay) < 0.01) {
         const len = txtRaw.length;
         if (len < bestLen) {
           bestLen = len;
           bestEl = $el;
-          bestMatch = m;
         }
       }
     });
@@ -573,32 +605,35 @@ function repaintContainerBars(app, htmlEl) {
   }
 
   if (!host) {
-    LOG.debug("container repaint: native bar not found; skip", { item: item.name, pct, load, capacity });
+    LOG.debug("container repaint: native bar not found; skip", { item: item.name, pct, loadLbs, capacityLbs });
     return;
   }
 
-  // Update bar width if we found one
   if (bar?.length) {
     if (bar.is('[role="progressbar"]')) bar.attr('aria-valuenow', String(pct)).css('width', `${pct}%`);
     else bar.css('width', `${pct}%`);
   }
 
-  // Update visible "X / Y" text inside label/host (non-destructively)
-  const newText = `${fmt2(load)} / ${fmt2(capacity)} lb`;
+  const isMetric = getSystemWeightUnit() === 'kg';
+  const unitLabel = isMetric ? 'кг' : 'lb';
+  const convert = (val) => isMetric ? val / LBS_PER_KG : val;
+  const loadDisplay = convert(loadLbs);
+  const capacityDisplay = convert(capacityLbs);
+  
   const updateTextInEl = ($el) => {
     const html = $el.html();
     const rx = /([0-9]+(?:[.,][0-9]+)?)\s*\/\s*([0-9]+(?:[.,][0-9]+)?)/;
     if (html && rx.test(html)) {
-      $el.html(html.replace(rx, `${fmt2(load)} / ${fmt2(capacity)}`));
+      $el.html(html.replace(rx, `${fmt2(loadDisplay)} / ${fmt2(capacityDisplay)}`));
     } else {
-      $el.text(newText);
+      $el.text(`${fmt2(loadDisplay)} / ${fmt2(capacityDisplay)} ${unitLabel}`);
     }
   };
 
   if (label?.length) updateTextInEl(label);
   else updateTextInEl(host);
 
-  LOG.debug("container repaint done", { item: item.name, pct, load, capacity });
+  LOG.debug("container repaint done", { item: item.name, pct, loadLbs, capacityLbs });
 }
 
 /* ============== UI: inline gear in .sheet-header ============== */
@@ -615,7 +650,7 @@ function ensureInlineReductionControl(app, htmlEl) {
     return;
   }
 
-  if (header.find(".wc-inline-gear").length) return; // already inserted
+  if (header.find(".wc-inline-gear").length) return;
 
   const btn = $(`<span class="wc-inline-gear" title="${game.i18n.localize("weighty-containers.inlineGear.title") || "Container Weight Reduction"}"><i class="fas fa-cog"></i></span>`);
   btn.on("click", () => openReductionDialog(doc));
@@ -635,41 +670,40 @@ async function openReductionDialog(containerItem) {
     return;
   }
   const cur = getReductionPct(containerItem);
-  const dlg = new Dialog({
+
+  const content = `
+    <form>
+      <div class="form-group">
+        <label>${game.i18n.localize("weighty-containers.reductionDialog.label") || "Reduction (%)"}</label>
+        <input type="number" name="pct" value="${cur}" min="0" max="100" step="1"/>
+        <p class="notes">${game.i18n.localize("weighty-containers.reductionDialog.notes") || "Applies to items directly inside this container. Nested containers apply their own reduction."}</p>
+      </div>
+    </form>`;
+
+  const pct = await Dialog.prompt({
     title: game.i18n.localize("weighty-containers.reductionDialog.title") || "Container Weight Reduction",
-    content: `
-      <form>
-        <div class="form-group">
-          <label>${game.i18n.localize("weighty-containers.reductionDialog.label") || "Reduction (%)"}</label>
-          <input type="number" name="pct" value="${cur}" min="0" max="100" step="1"/>
-          <p class="notes">${game.i18n.localize("weighty-containers.reductionDialog.notes") || "Applies to items directly inside this container. Nested containers apply their own reduction."}</p>
-        </div>
-      </form>`,
-    buttons: {
-      ok: {
-        label: game.i18n.localize("weighty-containers.reductionDialog.save") || "Save",
-        callback: async html => {
-          const val = Number(jq(html).find('input[name="pct"]').val());
-          const pct = Math.max(0, Math.min(100, Math.round(Number.isFinite(val) ? val : 0)));
-          if (!containerItem.parent) {
-            LOG.warn("Container item has no parent actor; falling back to direct update", { itemId: containerItem.id, itemName: containerItem.name });
-            await containerItem.update({ [`flags.${MODULE_ID}.reductionPct`]: pct });
-          } else if (window.wcSocket) {
-            await window.wcSocket.executeAsGM("updateReductionPct", `${containerItem.parent.id}.${containerItem.id}`, pct);
-          } else {
-            await containerItem.update({ [`flags.${MODULE_ID}.reductionPct`]: pct });
-          }
-          ui.notifications?.info(
-            game.i18n.format("weighty-containers.reductionSet.notification", { pct, containerName: containerItem.name }) ||
-            `${MODULE_ID}: reduction set to ${pct}% for "${containerItem.name}"`
-          );
-        }
-      },
-      cancel: {
-        label: game.i18n.localize("weighty-containers.reductionDialog.cancel") || "Cancel"
-      }
+    content: content,
+    label: game.i18n.localize("weighty-containers.reductionDialog.save") || "Save",
+    callback: (html) => {
+      const val = Number(jq(html).find('input[name="pct"]').val());
+      return Math.max(0, Math.min(100, Math.round(Number.isFinite(val) ? val : 0)));
     },
-    default: "ok"
+    rejectClose: false,
   });
-  dlg.render(true);
+
+  if (pct === null) return; // User cancelled the dialog
+
+  if (!containerItem.parent) {
+    LOG.warn("Container item has no parent actor; falling back to direct update", { itemId: containerItem.id, itemName: containerItem.name });
+    await containerItem.update({ [`flags.${MODULE_ID}.reductionPct`]: pct });
+  } else if (window.wcSocket) {
+    await window.wcSocket.executeAsGM("updateReductionPct", `${containerItem.parent.id}.${containerItem.id}`, pct);
+  } else {
+    await containerItem.update({ [`flags.${MODULE_ID}.reductionPct`]: pct });
+  }
+
+  ui.notifications?.info(
+    game.i18n.format("weighty-containers.reductionSet.notification", { pct, containerName: containerItem.name }) ||
+    `${MODULE_ID}: reduction set to ${pct}% for "${containerItem.name}"`
+  );
 }

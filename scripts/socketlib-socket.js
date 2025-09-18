@@ -1,5 +1,3 @@
-// socketlib-socket.js - Simplified wrapper for socketlib (place in scripts/ folder)
-
 export class SocketlibSocket {
   constructor(moduleId) {
     this.moduleId = moduleId;
@@ -44,4 +42,4 @@ export class SocketlibSocket {
     if (!this.socket) return;
     return this.socket.executeAsGM(name, ...args);
   }
-}
+ }

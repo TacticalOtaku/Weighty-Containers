@@ -27,5 +27,6 @@
   "weighty-containers.reductionDialog.notes": "Applies to items directly inside this container. Nested containers apply their own reduction.",
   "weighty-containers.reductionDialog.save": "Save",
   "weighty-containers.reductionDialog.cancel": "Cancel",
-  "weighty-containers.reductionSet.notification": "Reduction set to {pct}% for \"{containerName}\""
+  "weighty-containers.reductionSet.notification": "Reduction set to {pct}% for \"{containerName}\"",
+  "weighty-containers.exceedMessage.default_kg": "[{containerName}] Capacity exceeded: {before} + {delta} > {capacity} kg"
 }
