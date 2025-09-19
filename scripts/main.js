@@ -254,17 +254,25 @@ Hooks.once("ready", () => {
   Hooks.on("renderContainerSheet", injectAll);
 
   // Re-render relevant sheets after updates to ensure UI sync
-  Hooks.on("updateItem", (item) => {
-    if (!isContainer(item)) return;
-    const actor = item.parent;
-    if (!actor) return;
-    // Re-render actor sheet if open
-    const actorSheet = actor.sheet;
-    if (actorSheet?.rendered) actorSheet.render();
-    // Re-render item sheet if open
-    const itemSheet = item.sheet;
-    if (itemSheet?.rendered) itemSheet.render();
-  });
+  // Debounced rerender to avoid storms during migrations/updates
+Hooks.off("updateItem");
+const wcRerenderDebounce = (() => {
+  const timers = new Map();
+  return (key, fn, delay=50) => {
+    clearTimeout(timers.get(key));
+    const t = setTimeout(fn, delay);
+    timers.set(key, t);
+  };
+})();
+Hooks.on("updateItem", (item) => {
+  if (!isContainer(item)) return;
+  const actor = item.parent;
+  if (!actor) return;
+  const actorSheet = actor.sheet;
+  const itemSheet = item.sheet;
+  wcRerenderDebounce(`actor:${actor.id}`, () => { if (actorSheet?.rendered) actorSheet.render(false); }, 80);
+  wcRerenderDebounce(`item:${item.id}`, () => { if (itemSheet?.rendered) itemSheet.render(false); }, 80);
+});
 
   LOG.info("ready", { system: game.system?.id, version: game.system?.version });
 });
@@ -352,11 +360,35 @@ function getCapacityLbs(containerItem) {
 }
 
 /* ============== Loads math (all calculations in LBS) ============== */
-function computeAdjustedLoadWithTrace(actor, containerId) {
+// Build once per actor to avoid re-indexing on every call
+function buildIndex(actor) {
+  const by = new Map();
+  for (const it of actor?.items ?? []) {
+    const cid = it?.system?.container ?? null;
+    if (!cid) continue;
+    if (!by.has(cid)) by.set(cid, []);
+    by.get(cid).push(it);
+  }
+  return by;
+}
+
+function computeAdjustedLoadWithTrace(actor, containerId, byIdx = null, memo = null, visited = null) {
   const includeNested = game.settings.get(MODULE_ID, "includeNested");
   const trace = [];
   if (!actor || !containerId) return { load: 0, trace };
-  const by = indexByContainer(actor);
+  const by = byIdx ?? buildIndex(actor);
+  const memoMap = memo ?? new Map();
+  const vis = visited ?? new Set();
+  const memoKey = `${containerId}|${includeNested}|${getReductionPct(getItem(actor, containerId))}`;
+  if (memoMap.has(memoKey)) return { load: memoMap.get(memoKey), trace }; // trace omitted for memo hits
+
+  if (vis.has(containerId)) {
+    LOG.warn("Cycle detected in container nesting; breaking to prevent infinite recursion", { containerId });
+    memoMap.set(memoKey, 0);
+    return { load: 0, trace: [{ type: "cycle-break", id: containerId }] };
+  }
+  vis.add(containerId);
+
   const parent = getItem(actor, containerId);
   const parentRed = getReductionPct(parent) / 100;
   let load = 0;
@@ -368,7 +400,7 @@ function computeAdjustedLoadWithTrace(actor, containerId) {
       load += addItem;
       trace.push({ child: ch.name, id: ch.id, type: "container(item)", wOwnLbs: wLbs, reducedBy: parentRed, added: addItem });
       if (includeNested) {
-        const sub = computeAdjustedLoadWithTrace(actor, ch.id);
+        const sub = computeAdjustedLoadWithTrace(actor, ch.id, by, memoMap, vis);
         load += sub.load;
         trace.push({ child: ch.name, id: ch.id, type: "container(contents)", nestedAdded: sub.load });
       }
@@ -378,19 +410,24 @@ function computeAdjustedLoadWithTrace(actor, containerId) {
       trace.push({ child: ch.name, id: ch.id, type: "item", wOwnLbs: wLbs, reducedBy: parentRed, added: add });
     }
   }
-  return { load: Math.max(0, +load.toFixed(5)), trace };
+  vis.delete(containerId);
+  load = Math.max(0, +load.toFixed(5));
+  memoMap.set(memoKey, load);
+  return { load, trace };
 }
-function computeAdjustedLoad(actor, cid) { return computeAdjustedLoadWithTrace(actor, cid).load; }
+function computeAdjustedLoad(actor, cid, byIdx = null, memo = null) { return computeAdjustedLoadWithTrace(actor, cid, byIdx, memo).load; }
 
-// Returns total actor carried weight in LBS
+// Returns total actor carried weight in LBS, using a single index+memo to avoid N^2 explosions
 function computeActorAdjustedCarried(actor) {
   if (!actor) return 0;
   let total = 0;
+  const by = buildIndex(actor);
+  const memo = new Map();
   for (const it of actor.items ?? []) {
     if (it?.system?.container) continue; // top-level only
     if (isContainer(it)) {
       total += ownWeightLbs(it);
-      total += computeAdjustedLoad(actor, it.id);
+      total += computeAdjustedLoad(actor, it.id, by, memo);
     } else {
       total += ownWeightLbs(it);
     }
@@ -444,7 +481,7 @@ function enforceCapacityOnCreate(item, data) {
   const capacityLbs = getCapacityLbs(container);
   if (!capacityLbs) return;
 
-  const { load: currentLbs, trace } = computeAdjustedLoadWithTrace(actor, containerId);
+  const idx = buildIndex(actor); const memo = new Map(); const { load: currentLbs, trace } = computeAdjustedLoadWithTrace(actor, containerId, idx, memo);
   const parentRed = getReductionPct(container) / 100;
   
   const unit = num(data?.system?.weight?.value ?? data?.system?.weight, 0);
@@ -470,7 +507,7 @@ function enforceCapacityOnUpdate(item, changes) {
       const container = getItem(actor, will);
       const capacityLbs = getCapacityLbs(container);
       if (capacityLbs) {
-        const { load: currentLbs, trace } = computeAdjustedLoadWithTrace(actor, will);
+        const idx = buildIndex(actor); const memo = new Map(); const { load: currentLbs, trace } = computeAdjustedLoadWithTrace(actor, will, idx, memo);
         const parentRed = getReductionPct(container) / 100;
         const deltaLbs = (newQty - oldQty) * convertWeightToLbs(unitW(item), item?.system?.weight?.units) * (1 - parentRed);
         LOG.debug("preUpdate qty++ check (adjusted)", { container: container?.name, capacityLbs, currentLbs, parentRed, deltaLbs, trace });
@@ -488,11 +525,11 @@ function enforceCapacityOnUpdate(item, changes) {
     if (dest) {
       const capacityLbs = getCapacityLbs(dest);
       if (capacityLbs) {
-        const { load: currentLbs, trace } = computeAdjustedLoadWithTrace(actor, will);
+        const idx = buildIndex(actor); const memo = new Map(); const { load: currentLbs, trace } = computeAdjustedLoadWithTrace(actor, will, idx, memo);
         const destRed = getReductionPct(dest) / 100;
         let deltaLbs = ownWeightLbs(item) * (1 - destRed);
         if (game.settings.get(MODULE_ID, "includeNested")) {
-          const sub = computeAdjustedLoadWithTrace(actor, item.id);
+          const sub = computeAdjustedLoadWithTrace(actor, item.id, idx, memo);
           deltaLbs += sub.load;
           trace.push({ movingContainerContents: item.name, id: item.id, added: sub.load });
         }
@@ -513,7 +550,7 @@ function enforceCapacityOnUpdate(item, changes) {
     const container = getItem(actor, was);
     const capacityLbs = getCapacityLbs(container);
     if (capacityLbs) {
-      const { load: currentLbs, trace } = computeAdjustedLoadWithTrace(actor, was);
+      const idx = buildIndex(actor); const memo = new Map(); const { load: currentLbs, trace } = computeAdjustedLoadWithTrace(actor, was, idx, memo);
       const parentRed = getReductionPct(container) / 100;
       const oldTotalLbs = ownWeightLbs(item) * (1 - parentRed);
       const newTotalLbs = convertWeightToLbs(num(wChange, unitW(item)) * qty(item), item?.system?.weight?.units) * (1 - parentRed);
@@ -548,60 +585,56 @@ function repaintContainerBars(app, htmlEl) {
     LOG.debug("container has no capacity UI to repaint");
     return;
   }
-  const { load: loadLbs } = computeAdjustedLoadWithTrace(item.parent, item.id);
+  const $html = jq(htmlEl);
+  // Skip if the sheet contains active rich-text editors; do not mutate those nodes
+  const skip = (el) => {
+    const $el = jq(el);
+    return $el.closest(".editor, .editor-content, .prosemirror-editor, .tox, [contenteditable='true']").length > 0;
+  };
+
+  const { load: loadLbs } = computeAdjustedLoadWithTrace(item.parent, item.id); // single call
   const pct = Math.max(0, Math.min(100, Math.round((loadLbs / capacityLbs) * 100)));
 
-  const $html = jq(htmlEl);
-
-  const blocks = $html.find(`
-    .capacity, .item-capacity, .resource.capacity, .dnd5e-capacity,
-    [data-resource="capacity"], [data-section*="capacity"], section.capacity,
-    .progress, .meter
-  `);
-
+  // Prefer explicit capacity regions rather than broad selectors
   let host = null, bar = null, label = null;
-  blocks.each((i, el) => {
+  const candidates = $html.find(
+    `[data-resource="capacity"], section.capacity, .item-capacity, .dnd5e-capacity, .resource.capacity`
+  ).filter((_, el) => !skip(el));
+
+  candidates.each((i, el) => {
     if (host) return;
     const $el = jq(el);
-    const text = ($el.text() || "").toLowerCase();
-    const looks = /capacity|вместим|ёмк|weight|вес|lb|lbs|kg|кг/.test(text);
     const b = $el.find('.bar, .progress-bar, .meter-bar, .fill, .value, .pct, [role="progressbar"]').first();
-    if (looks && b.length) {
-      host = $el;
-      bar = b;
+    if (b.length) {
+      host = $el; bar = b;
       label = $el.find('.label, .progress-label, .meter-label, .value, .capacity-value, .caption').first();
     }
   });
 
   if (!host) {
+    // Fallback: search text node that matches X / Y near a progress element but not inside editors
     const isMetric = getSystemWeightUnit() === 'kg';
     const capacityDisplay = isMetric ? capacityLbs / LBS_PER_KG : capacityLbs;
     const rx = /([0-9]+(?:[.,][0-9]+)?)\s*\/\s*([0-9]+(?:[.,][0-9]+)?)/;
-    let bestEl = null, bestLen = 1e9;
 
     $html.find("*").each((i, el) => {
+      if (host) return;
       const $el = jq(el);
       if (!$el.is(":visible")) return;
+      if (skip(el)) return;
+      if ($el.find("input, textarea, select, [contenteditable='true']").length) return;
       const txtRaw = ($el.text() || "");
       const m = txtRaw.match(rx);
       if (!m) return;
-      const max = Number(m[2].replace(',', '.'));
+      const max = Number(String(m[2]).replace(',', '.'));
       if (!Number.isFinite(max)) return;
       if (Math.abs(max - capacityDisplay) < 0.01) {
-        const len = txtRaw.length;
-        if (len < bestLen) {
-          bestLen = len;
-          bestEl = $el;
-        }
+        host = $el;
+        const maybeBar = host.closest(":scope").find('.bar, .progress-bar, .meter-bar, .fill, [role="progressbar"]').first();
+        if (maybeBar.length) bar = maybeBar;
+        label = host;
       }
     });
-
-    if (bestEl) {
-      host = bestEl;
-      const maybeBar = host.closest(":scope").find('.bar, .progress-bar, .meter-bar, .fill, [role="progressbar"]').first();
-      if (maybeBar.length) bar = maybeBar;
-      label = host;
-    }
   }
 
   if (!host) {
@@ -619,19 +652,24 @@ function repaintContainerBars(app, htmlEl) {
   const convert = (val) => isMetric ? val / LBS_PER_KG : val;
   const loadDisplay = convert(loadLbs);
   const capacityDisplay = convert(capacityLbs);
-  
-  const updateTextInEl = ($el) => {
-    const html = $el.html();
-    const rx = /([0-9]+(?:[.,][0-9]+)?)\s*\/\s*([0-9]+(?:[.,][0-9]+)?)/;
-    if (html && rx.test(html)) {
-      $el.html(html.replace(rx, `${fmt2(loadDisplay)} / ${fmt2(capacityDisplay)}`));
-    } else {
-      $el.text(`${fmt2(loadDisplay)} / ${fmt2(capacityDisplay)} ${unitLabel}`);
+
+  const setSafeText = ($el, text) => {
+    // Never .html() replace; use text() so we don't nuke interactive children
+    if ($el.children().length === 0) $el.text(text);
+    else {
+      // If there is mixed content, append/update a dedicated span
+      let span = $el.find('.wc-capacity-text').first();
+      if (!span.length) {
+        span = $('<span class="wc-capacity-text"></span>');
+        $el.append(span);
+      }
+      span.text(text);
     }
   };
 
-  if (label?.length) updateTextInEl(label);
-  else updateTextInEl(host);
+  const textValue = `${fmt2(loadDisplay)} / ${fmt2(capacityDisplay)} ${unitLabel}`;
+  if (label?.length) setSafeText(label, textValue);
+  else setSafeText(host, textValue);
 
   LOG.debug("container repaint done", { item: item.name, pct, loadLbs, capacityLbs });
 }
