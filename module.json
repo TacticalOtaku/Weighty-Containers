@@ -1,11 +1,11 @@
 {
   "id": "weighty-containers",
   "title": "Weighty Containers",
-  "description": "Manages container weight capacity, allows weight reduction for items inside, and adjusts actor encumbrance display. Improved multiplayer synchronization.",
-  "version": "1.5.2",
+  "description": "Manages container weight capacity, allows weight reduction for items inside, and adjusts actor encumbrance display. Full Foundry v13 and dnd5e 5.2.x support.",
+  "version": "3.0.0",
   "compatibility": {
-    "minimum": "12.343",
-    "verified": "13.346"
+    "minimum": "13",
+    "verified": "13.351"
   },
   "authors": [
     {
@@ -18,8 +18,8 @@
         "id": "dnd5e",
         "type": "system",
         "compatibility": {
-          "minimum": "3.2.0",
-          "verified": "4.4.4"
+          "minimum": "5.1.0",
+          "verified": "5.2.5"
         }
       }
     ],
@@ -27,21 +27,24 @@
       {
         "id": "lib-wrapper",
         "type": "module",
-        "compatibility": {}
-      },
+        "compatibility": {
+          "minimum": "1.12.0.0"
+        }
+      }
+    ],
+    "optional": [
       {
-        "id": "dae",
+        "id": "socketlib",
         "type": "module",
-        "compatibility": {}
+        "compatibility": {
+          "minimum": "1.0.0"
+        }
       }
     ],
     "conflicts": []
   },
   "esmodules": [
-    "main.js"
-  ],
-  "styles": [
-    "styles/weighty-containers.css"
+    "scripts/main.js"
   ],
   "languages": [
     {
@@ -55,12 +58,8 @@
       "path": "lang/ru.json"
     }
   ],
-  "flags": {
-    "scope": "world",
-    "requiresReload": true
-  },
   "url": "https://github.com/TacticalOtaku/Weighty-Containers",
   "manifest": "https://raw.githubusercontent.com/TacticalOtaku/Weighty-Containers/main/module.json",
-  "download": "https://github.com/TacticalOtaku/Weighty-Containers/releases/download/v1.5.2/weighty-containers-v1.5.2.zip",
+  "download": "https://github.com/TacticalOtaku/Weighty-Containers/releases/download/v3.0.0/weighty-containers-v3.0.0.zip",
   "socket": true
 }
