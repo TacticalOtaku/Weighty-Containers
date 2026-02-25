@@ -898,23 +898,25 @@ async function openReductionDialog(containerItem) {
   }
 
   const cur = getReductionPct(containerItem);
+  const title = game.i18n.localize(`${MODULE_ID}.reductionDialog.title`);
+  const saveLabel = game.i18n.localize(`${MODULE_ID}.reductionDialog.save`);
+  const fieldLabel = game.i18n.localize(`${MODULE_ID}.reductionDialog.label`);
+
   const content = `
-    <form>
-      <div class="form-group">
-        <label>${game.i18n.localize(`${MODULE_ID}.reductionDialog.label`)}</label>
-        <input type="number" name="pct" value="${cur}" min="0" max="100" step="1" autofocus/>
-        <p class="notes">${game.i18n.localize(`${MODULE_ID}.reductionDialog.notes`)}</p>
-      </div>
-    </form>`;
+    <div style="display:flex; align-items:center; gap:8px; padding:4px 0;">
+      <label style="white-space:nowrap; font-weight:500;">${fieldLabel}</label>
+      <input type="number" name="pct" value="${cur}" min="0" max="100" step="1"
+             style="width:64px; text-align:center;" autofocus/>
+    </div>`;
 
   let pct = null;
 
   if (foundry.applications?.api?.DialogV2) {
     pct = await foundry.applications.api.DialogV2.prompt({
-      window: { title: game.i18n.localize(`${MODULE_ID}.reductionDialog.title`) },
+      window: { title, minimizable: false },
       content,
       ok: {
-        label: game.i18n.localize(`${MODULE_ID}.reductionDialog.save`),
+        label: saveLabel,
         callback: (event, button, dialog) => {
           const root = dialog?.element ?? dialog;
           const el = root instanceof HTMLElement ? root : document.body;
@@ -927,9 +929,9 @@ async function openReductionDialog(containerItem) {
     });
   } else {
     pct = await Dialog.prompt({
-      title: game.i18n.localize(`${MODULE_ID}.reductionDialog.title`),
+      title,
       content,
-      label: game.i18n.localize(`${MODULE_ID}.reductionDialog.save`),
+      label: saveLabel,
       callback: (html) => {
         const el = html instanceof HTMLElement ? html : html[0] ?? html;
         const input = el.querySelector('input[name="pct"]');
