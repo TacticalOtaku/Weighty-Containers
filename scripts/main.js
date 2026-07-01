@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────
-// Weighty Containers — Foundry VTT v13.351 / dnd5e 5.2.5
+// Weighty Containers - Foundry VTT v14.363 / dnd5e 5.3.3
 // ─────────────────────────────────────────────────────────
 
 const MODULE_ID = "weighty-containers";
@@ -167,7 +167,19 @@ function fmt2(n) {
   return Number(n).toFixed(2);
 }
 
-// ══════════════════════ Item Helpers (dnd5e 5.2.x) ══════════════════════
+function _escapeHtml(value) {
+  const text = String(value ?? "");
+  if (foundry.utils.escapeHTML) return foundry.utils.escapeHTML(text);
+  return text.replace(/[&<>"']/g, c => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;"
+  }[c]));
+}
+
+// ══════════════════════ Item Helpers (dnd5e 5.3.x) ══════════════════════
 
 function getItemUnitWeight(item) {
   if (!item?.system) return 0;
@@ -204,6 +216,13 @@ function getItem(actor, id) {
   return actor?.items?.get(id) ?? null;
 }
 
+function renderApplication(app, force = false) {
+  if (!app?.rendered || typeof app.render !== "function") return;
+  const ApplicationV2 = foundry.applications?.api?.ApplicationV2;
+  if (ApplicationV2 && app instanceof ApplicationV2) return app.render({ force });
+  return app.render(force);
+}
+
 // ══════════════════════ Container-specific Helpers ══════════════════════
 
 function getReductionPct(containerItem) {
@@ -212,14 +231,432 @@ function getReductionPct(containerItem) {
   return Math.max(0, Math.min(100, Math.round(v)));
 }
 
+function normalizeToken(value) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function parseTokenList(value) {
+  if (Array.isArray(value)) return value.map(normalizeToken).filter(Boolean);
+  return String(value ?? "")
+    .split(/[,\n;]/)
+    .map(normalizeToken)
+    .filter(Boolean);
+}
+
+function formatTokenList(values) {
+  return Array.isArray(values) ? values.join(", ") : "";
+}
+
+function localizeConfigLabel(label, fallback = null) {
+  if (!label) return fallback ?? "";
+  return game.i18n.localize(String(label));
+}
+
+function addOption(map, value, label = null) {
+  const key = normalizeToken(value);
+  if (!key || map.has(key)) return;
+  map.set(key, localizeConfigLabel(label, String(value)));
+}
+
+function optionsFromConfig(config) {
+  const options = new Map();
+  if (!config) return [];
+
+  if (config instanceof Map) {
+    for (const [value, label] of config.entries()) addOption(options, value, label);
+  } else if (Array.isArray(config) || config instanceof Set) {
+    for (const value of config) addOption(options, value);
+  } else if (typeof config === "object") {
+    for (const [value, label] of Object.entries(config)) {
+      if (label && typeof label === "object" && !Array.isArray(label)) {
+        addOption(options, value, label.label ?? label.name ?? value);
+      } else {
+        addOption(options, value, label);
+      }
+    }
+  }
+
+  return Array.from(options, ([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label, game.i18n.lang));
+}
+
+function valuesFromConfig(config) {
+  if (!config) return [];
+  if (config instanceof Map) return Array.from(config.keys());
+  if (Array.isArray(config) || config instanceof Set) return Array.from(config);
+  if (typeof config !== "object") return [config];
+
+  const values = [];
+  for (const [key, value] of Object.entries(config)) {
+    if (value === false || value == null) continue;
+    if (value === true || typeof value !== "object") {
+      values.push(key);
+      continue;
+    }
+
+    const nested = valuesFromConfig(value);
+    if (nested.length) values.push(...nested);
+    else values.push(key);
+  }
+  return values;
+}
+
+function getRuleItemTypeGroups() {
+  const itemTypes = new Map();
+
+  for (const type of valuesFromConfig(game.system?.documentTypes?.Item)) addOption(itemTypes, type, `TYPES.Item.${type}`);
+  for (const [type, label] of Object.entries(CONFIG.Item?.typeLabels ?? {})) addOption(itemTypes, type, label);
+
+  for (const type of ["weapon", "consumable", "equipment", "tool", "loot", "container", "backpack", "spell", "feat"]) {
+    addOption(itemTypes, type, `TYPES.Item.${type}`);
+  }
+
+  const options = Array.from(itemTypes, ([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label, game.i18n.lang));
+
+  return [{ label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.itemTypes`), options }];
+}
+
+function getRuleSubtypeGroups() {
+  const dnd5e = CONFIG.DND5E ?? {};
+  const groups = [];
+  const addGroup = (key, labelKey) => {
+    const options = optionsFromConfig(dnd5e[key]);
+    if (options.length) groups.push({ label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.${labelKey}`), options });
+  };
+
+  groups.push({
+    label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.weaponRange`),
+    options: [
+      { value: "melee", label: game.i18n.localize(`${MODULE_ID}.configDialog.option.melee`) },
+      { value: "ranged", label: game.i18n.localize(`${MODULE_ID}.configDialog.option.ranged`) }
+    ]
+  });
+
+  addGroup("weaponTypes", "weaponTypes");
+  addGroup("consumableTypes", "consumableTypes");
+  addGroup("equipmentTypes", "equipmentTypes");
+  addGroup("armorTypes", "armorTypes");
+  addGroup("toolTypes", "toolTypes");
+  addGroup("lootTypes", "lootTypes");
+
+  if (!groups.some(g => g.options.length)) {
+    groups.push({
+      label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.commonSubtypes`),
+      options: [
+        { value: "melee", label: game.i18n.localize(`${MODULE_ID}.configDialog.option.melee`) },
+        { value: "ranged", label: game.i18n.localize(`${MODULE_ID}.configDialog.option.ranged`) },
+        { value: "ammo", label: "Ammo" },
+        { value: "potion", label: "Potion" },
+        { value: "scroll", label: "Scroll" },
+        { value: "wand", label: "Wand" },
+        { value: "grenade", label: "Grenade" }
+      ]
+    });
+  }
+
+  return groups;
+}
+
+function getRulePropertyGroups() {
+  const dnd5e = CONFIG.DND5E ?? {};
+  const groups = [];
+  const seen = new Set();
+  const addGroup = (key, labelKey) => {
+    const options = optionsFromConfig(dnd5e[key]).filter(option => {
+      if (seen.has(option.value)) return false;
+      seen.add(option.value);
+      return true;
+    });
+    if (options.length) groups.push({ label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.${labelKey}`), options });
+  };
+
+  addGroup("itemProperties", "itemProperties");
+  addGroup("weaponProperties", "weaponProperties");
+  addGroup("equipmentProperties", "equipmentProperties");
+  addGroup("consumableProperties", "consumableProperties");
+
+  const validProperties = dnd5e.validProperties;
+  if (validProperties && typeof validProperties === "object") {
+    for (const [itemType, properties] of Object.entries(validProperties)) {
+      const options = optionsFromConfig(properties).filter(option => {
+        if (seen.has(option.value)) return false;
+        seen.add(option.value);
+        return true;
+      });
+      if (options.length) groups.push({ label: localizeConfigLabel(`TYPES.Item.${itemType}`, itemType), options });
+    }
+  }
+
+  if (!groups.length) {
+    groups.push({
+      label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.itemProperties`),
+      options: [
+        { value: "amm", label: "Ammunition" },
+        { value: "fin", label: "Finesse" },
+        { value: "fir", label: "Firearm" },
+        { value: "hvy", label: "Heavy" },
+        { value: "lgt", label: "Light" },
+        { value: "mgc", label: "Magical" },
+        { value: "rch", label: "Reach" },
+        { value: "rel", label: "Reload" },
+        { value: "ret", label: "Returning" },
+        { value: "thr", label: "Thrown" },
+        { value: "two", label: "Two-Handed" },
+        { value: "ver", label: "Versatile" }
+      ]
+    });
+  }
+
+  return groups;
+}
+
+function renderSelectOptions(groups, selectedValues) {
+  const selected = new Set(parseTokenList(selectedValues));
+  const selectedAttr = value => selected.has(normalizeToken(value)) ? " selected" : "";
+  const option = ({ value, label }) => `<option value="${_escapeHtml(value)}"${selectedAttr(value)}>${_escapeHtml(label)}</option>`;
+  return groups.map(group => {
+    const options = group.options.map(option).join("");
+    return `<optgroup label="${_escapeHtml(group.label)}">${options}</optgroup>`;
+  }).join("");
+}
+
+function summarizeLabels(labels) {
+  if (!labels.length) return game.i18n.localize(`${MODULE_ID}.configDialog.any`);
+  if (labels.length <= 2) return labels.join(", ");
+  return game.i18n.format(`${MODULE_ID}.configDialog.selectedSummary`, {
+    first: labels.slice(0, 2).join(", "),
+    count: labels.length - 2
+  });
+}
+
+function selectedLabelsFromGroups(groups, selectedValues) {
+  const selected = new Set(parseTokenList(selectedValues));
+  const labels = [];
+  for (const group of groups) {
+    for (const option of group.options) {
+      if (selected.has(normalizeToken(option.value))) labels.push(option.label);
+    }
+  }
+  return labels;
+}
+
+function renderCheckboxDropdown(name, groups, selectedValues) {
+  const selected = new Set(parseTokenList(selectedValues));
+  const known = new Set(groups.flatMap(group => group.options.map(option => normalizeToken(option.value))));
+  const unknownOptions = Array.from(selected)
+    .filter(value => !known.has(value))
+    .map(value => ({ value, label: value }));
+  const allGroups = unknownOptions.length
+    ? [...groups, { label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.savedValues`), options: unknownOptions }]
+    : groups;
+  const checkedAttr = value => selected.has(normalizeToken(value)) ? " checked" : "";
+  const summary = summarizeLabels(selectedLabelsFromGroups(allGroups, selectedValues));
+  const groupMarkup = allGroups.map(group => {
+    const options = group.options.map(option => `
+      <label class="wc-check-row">
+        <input type="checkbox" name="${_escapeHtml(name)}" value="${_escapeHtml(option.value)}"
+               data-label="${_escapeHtml(option.label)}"${checkedAttr(option.value)}>
+        <span>${_escapeHtml(option.label)}</span>
+      </label>`).join("");
+    return `
+      <div class="wc-check-group">
+        <div class="wc-check-group-title">${_escapeHtml(group.label)}</div>
+        ${options}
+      </div>`;
+  }).join("");
+
+  return `
+    <details class="wc-check-dropdown" data-name="${_escapeHtml(name)}">
+      <summary>
+        <span class="wc-selection-text" data-placeholder="${_escapeHtml(game.i18n.localize(`${MODULE_ID}.configDialog.any`))}">
+          ${_escapeHtml(summary)}
+        </span>
+      </summary>
+      <div class="wc-check-panel">
+        ${groupMarkup}
+      </div>
+    </details>`;
+}
+
+function getSelectedTokens(root, name) {
+  const checkboxes = root?.querySelectorAll?.(`input[type="checkbox"][name="${name}"]:checked`) ?? [];
+  if (checkboxes.length) {
+    return Array.from(checkboxes)
+      .map(input => normalizeToken(input.value))
+      .filter(Boolean);
+  }
+
+  const select = root?.querySelector?.(`select[name="${name}"]`);
+  if (!select) return [];
+  return Array.from(select.selectedOptions ?? [])
+    .map(option => normalizeToken(option.value))
+    .filter(Boolean);
+}
+
+function updateCheckDropdownSummary(dropdown) {
+  const text = dropdown?.querySelector?.(".wc-selection-text");
+  if (!text) return;
+  const labels = Array.from(dropdown.querySelectorAll('input[type="checkbox"]:checked'))
+    .map(input => input.dataset.label || input.value)
+    .filter(Boolean);
+  const summary = summarizeLabels(labels);
+  text.textContent = summary;
+  text.title = labels.join(", ");
+}
+
+function registerCheckDropdownListeners() {
+  if (registerCheckDropdownListeners.ready) return;
+  registerCheckDropdownListeners.ready = true;
+  document.addEventListener("change", (event) => {
+    const checkbox = event.target?.closest?.('.wc-check-dropdown input[type="checkbox"]');
+    if (!checkbox) return;
+    updateCheckDropdownSummary(checkbox.closest(".wc-check-dropdown"));
+  });
+}
+
+function getContainerRestrictions(containerItem) {
+  const flags = containerItem?.flags?.[MODULE_ID] ?? {};
+  return {
+    allowedTypes: parseTokenList(flags.allowedTypes),
+    allowedSubtypes: parseTokenList(flags.allowedSubtypes),
+    requiredProperties: parseTokenList(flags.requiredProperties)
+  };
+}
+
+function getChangeProperty(changes, path) {
+  if (!changes) return undefined;
+  if (Object.hasOwn(changes, path)) return changes[path];
+  return foundry.utils.getProperty(changes, path);
+}
+
+function makeItemCandidate(item, changes = {}) {
+  const source = item?.toObject?.() ?? {
+    name: item?.name,
+    type: item?.type,
+    system: foundry.utils.deepClone(item?.system ?? {})
+  };
+  const expanded = foundry.utils.expandObject(changes ?? {});
+  return foundry.utils.mergeObject(source, expanded, { inplace: false, applyOperators: true });
+}
+
+function getItemTypeData(itemData) {
+  const typeData = itemData?.system?.type;
+  return (typeData && typeof typeData === "object") ? typeData : {};
+}
+
+function getItemPropertyTokens(itemData) {
+  const props = itemData?.system?.properties;
+  const tokens = new Set();
+  if (props instanceof Set) {
+    for (const prop of props) tokens.add(normalizeToken(prop));
+  } else if (Array.isArray(props)) {
+    for (const prop of props) tokens.add(normalizeToken(prop));
+  } else if (props && typeof props === "object") {
+    for (const [key, value] of Object.entries(props)) {
+      if (value) tokens.add(normalizeToken(key));
+    }
+  } else if (props) {
+    tokens.add(normalizeToken(props));
+  }
+  tokens.delete("");
+  return tokens;
+}
+
+function getItemMatchTokens(itemData) {
+  const tokens = new Set();
+  const add = value => {
+    const token = normalizeToken(value);
+    if (token) tokens.add(token);
+  };
+
+  add(itemData?.type);
+
+  const typeData = getItemTypeData(itemData);
+  add(typeData.value);
+  add(typeData.subtype);
+  add(typeData.baseItem);
+  add(typeData.identifier);
+
+  add(CONFIG.DND5E?.weaponTypeMap?.[typeData.value]);
+
+  const systemAttackType = itemData?.system?.attackType;
+  add(typeof systemAttackType === "function" ? null : systemAttackType);
+
+  for (const prop of getItemPropertyTokens(itemData)) tokens.add(prop);
+
+  return tokens;
+}
+
+function validateContainerRestrictions(containerItem, itemData) {
+  const restrictions = getContainerRestrictions(containerItem);
+  if (!restrictions.allowedTypes.length && !restrictions.allowedSubtypes.length && !restrictions.requiredProperties.length) {
+    return { ok: true, restrictions };
+  }
+
+  const itemType = normalizeToken(itemData?.type);
+  if (restrictions.allowedTypes.length && !restrictions.allowedTypes.includes(itemType)) {
+    return { ok: false, reason: "type", restrictions };
+  }
+
+  const matchTokens = getItemMatchTokens(itemData);
+  if (restrictions.allowedSubtypes.length && !restrictions.allowedSubtypes.some(token => matchTokens.has(token))) {
+    return { ok: false, reason: "subtype", restrictions };
+  }
+
+  if (restrictions.requiredProperties.length && !restrictions.requiredProperties.every(token => matchTokens.has(token))) {
+    return { ok: false, reason: "property", restrictions };
+  }
+
+  return { ok: true, restrictions };
+}
+
+function _makeRestrictionMessage({ containerName, itemName, restrictions }) {
+  const details = [];
+  if (restrictions.allowedTypes.length) details.push(game.i18n.format(`${MODULE_ID}.restrictionMessage.types`, {
+    types: restrictions.allowedTypes.join(", ")
+  }));
+  if (restrictions.allowedSubtypes.length) details.push(game.i18n.format(`${MODULE_ID}.restrictionMessage.subtypes`, {
+    subtypes: restrictions.allowedSubtypes.join(", ")
+  }));
+  if (restrictions.requiredProperties.length) details.push(game.i18n.format(`${MODULE_ID}.restrictionMessage.properties`, {
+    properties: restrictions.requiredProperties.join(", ")
+  }));
+
+  return game.i18n.format(`${MODULE_ID}.restrictionMessage.default`, {
+    containerName: containerName ?? "Container",
+    itemName: itemName ?? "Item",
+    rules: details.join("; ")
+  });
+}
+
+function _notifyRestriction({ actorName, containerName, itemName, restrictions }) {
+  const msg = _makeRestrictionMessage({ containerName, itemName, restrictions });
+  wcSocket.executeForEveryone("notifyExceedRemote", { msg, actorName, containerName, itemName, restrictions });
+  LOG.info("container restriction failed", { actorName, containerName, itemName, restrictions });
+}
+
+function _enforceContainerRestrictions(actor, container, itemData) {
+  const result = validateContainerRestrictions(container, itemData);
+  if (result.ok) return true;
+  _notifyRestriction({
+    actorName: actor?.name,
+    containerName: container?.name,
+    itemName: itemData?.name,
+    restrictions: result.restrictions
+  });
+  if (game.settings.get(MODULE_ID, "enforceMode") === "block") return false;
+  return true;
+}
+
 /**
- * dnd5e 5.2.x: system.capacity = { count, volume: {...}, weight: { value, units } }
+ * dnd5e 5.3.x: system.capacity = { count, volume: {...}, weight: { value, units } }
  */
 function getCapacityLbs(containerItem) {
   const cap = containerItem?.system?.capacity;
   if (!cap) return null;
 
-  // dnd5e 5.2.x: capacity.weight.value + capacity.weight.units
+  // dnd5e 5.3.x: capacity.weight.value + capacity.weight.units
   if (cap.weight?.value != null) {
     const v = num(cap.weight.value, 0);
     if (v > 0) {
@@ -389,9 +826,89 @@ Hooks.once("init", () => {
         cursor: pointer; margin-left: 0.25rem;
       }
       .wc-inline-gear:hover { background: rgba(0,0,0,.12); }
+      .wc-config-dialog {
+        display: grid; gap: 12px; min-width: 360px;
+      }
+      .wc-config-field {
+        display: grid; gap: 4px; font-weight: 600;
+      }
+      .wc-config-dialog input {
+        width: 100%;
+      }
+      .wc-check-dropdown {
+        position: relative;
+        width: 100%;
+        font-weight: 400;
+      }
+      .wc-check-dropdown summary {
+        align-items: center;
+        background: var(--color-bg-option, rgba(255,255,255,.08));
+        border: 1px solid var(--color-border-light-tertiary, rgba(255,255,255,.22));
+        border-radius: 4px;
+        cursor: pointer;
+        display: flex;
+        gap: 0.5rem;
+        min-height: 2rem;
+        padding: 0.35rem 0.55rem;
+      }
+      .wc-check-dropdown summary::marker {
+        color: var(--color-text-light-highlight, currentColor);
+      }
+      .wc-selection-text {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .wc-check-panel {
+        background: var(--color-bg, #1f1b24);
+        border: 1px solid var(--color-border-highlight, rgba(255,255,255,.28));
+        border-radius: 4px;
+        box-shadow: 0 8px 18px rgba(0,0,0,.35);
+        box-sizing: border-box;
+        left: 0;
+        margin-top: 2px;
+        max-height: 14rem;
+        overflow: auto;
+        padding: 0.35rem 0;
+        position: absolute;
+        right: 0;
+        z-index: 20;
+      }
+      .wc-check-group + .wc-check-group {
+        border-top: 1px solid rgba(255,255,255,.12);
+        margin-top: 0.25rem;
+        padding-top: 0.25rem;
+      }
+      .wc-check-group-title {
+        color: var(--color-text-light-heading, currentColor);
+        font-weight: 700;
+        padding: 0.25rem 0.65rem;
+      }
+      .wc-check-row {
+        align-items: center;
+        display: flex;
+        gap: 0.5rem;
+        margin: 0;
+        padding: 0.25rem 0.65rem;
+      }
+      .wc-check-row:hover {
+        background: rgba(255,255,255,.08);
+      }
+      .wc-check-row input {
+        flex: 0 0 auto;
+        width: auto;
+      }
+      .wc-config-dialog .hint {
+        color: var(--color-text-dark-secondary, #666);
+        font-size: 0.85em;
+        font-weight: 400;
+      }
     `;
     document.head.appendChild(style);
   }
+  registerCheckDropdownListeners();
 
   try {
     LOG.setLevel(game.settings.get(MODULE_ID, "logLevel"));
@@ -405,7 +922,7 @@ Hooks.once("init", () => {
 // ══════════════════════ Ready ══════════════════════
 
 Hooks.once("ready", () => {
-  wcSocket.register("updateReductionPct", _socketUpdateReduction);
+  wcSocket.register("updateContainerConfig", _socketUpdateContainerConfig);
   wcSocket.register("notifyExceedRemote", _socketNotifyExceed);
   wcSocket.init();
 
@@ -423,15 +940,20 @@ Hooks.once("ready", () => {
 
 // ══════════════════════ Socket Handlers ══════════════════════
 
-async function _socketUpdateReduction(containerId, pct) {
+async function _socketUpdateContainerConfig(containerId, config) {
   if (!game.user.isGM) return;
   const [actorId, itemId] = containerId.split(".");
   const actor = game.actors.get(actorId);
   if (!actor) return;
   const container = getItem(actor, itemId);
   if (!container) return;
-  await container.update({ [`flags.${MODULE_ID}.reductionPct`]: pct });
-  LOG.info("Socket: reduction updated", { container: container.name, pct });
+  await container.update({
+    [`flags.${MODULE_ID}.reductionPct`]: config.reductionPct,
+    [`flags.${MODULE_ID}.allowedTypes`]: config.allowedTypes,
+    [`flags.${MODULE_ID}.allowedSubtypes`]: config.allowedSubtypes,
+    [`flags.${MODULE_ID}.requiredProperties`]: config.requiredProperties
+  });
+  LOG.info("Socket: container config updated", { container: container.name, config });
 }
 
 async function _socketNotifyExceed(data) {
@@ -441,7 +963,7 @@ async function _socketNotifyExceed(data) {
 // ══════════════════════════════════════════════════════════════════
 // PRIMARY PATCH: Override ContainerData computed getters
 // ══════════════════════════════════════════════════════════════════
-// In dnd5e 5.2.x, ContainerData has computed getters:
+// In dnd5e 5.3.x, ContainerData has computed getters:
 //   - contentsWeight  (weight of all items inside, in display units)
 //   - totalWeight     (contentsWeight + own weight + currency weight)
 //
@@ -658,18 +1180,22 @@ function _registerEnforcementHooks() {
 
 function _enforceOnCreate(item, data) {
   const actor = item?.parent;
-  const containerId = data?.system?.container ?? null;
+  const containerId = getChangeProperty(data, "system.container") ?? item?.system?.container ?? null;
   if (!actor || !containerId) return;
 
   const container = getItem(actor, containerId);
   if (!container) return;
+  const itemData = makeItemCandidate(item, data);
+
+  if (_enforceContainerRestrictions(actor, container, itemData) === false) return false;
+
   const capacityLbs = getCapacityLbs(container);
   if (!capacityLbs) return;
 
   const { load: currentLbs } = computeAdjustedLoad(actor, containerId);
   const reduction = getReductionPct(container) / 100;
 
-  const rawWeight = data?.system?.weight;
+  const rawWeight = itemData?.system?.weight;
   let unitWeight = 0;
   let units = null;
   if (typeof rawWeight === "object" && rawWeight !== null) {
@@ -678,7 +1204,7 @@ function _enforceOnCreate(item, data) {
   } else {
     unitWeight = num(rawWeight, 0);
   }
-  const qty = num(data?.system?.quantity, 1);
+  const qty = num(itemData?.system?.quantity, 1);
   const deltaLbs = convertToLbs(unitWeight * qty, units) * (1 - reduction);
 
   if (currentLbs + deltaLbs > capacityLbs) {
@@ -692,11 +1218,19 @@ function _enforceOnUpdate(item, changes) {
   if (!actor) return;
 
   const currentCid = item.system?.container ?? null;
-  const newCid = changes?.system?.container ?? currentCid;
+  const explicitContainer = getChangeProperty(changes, "system.container");
+  const newCid = explicitContainer !== undefined ? explicitContainer : currentCid;
+  const itemData = makeItemCandidate(item, changes);
+
+  if (newCid) {
+    const container = getItem(actor, newCid);
+    if (container && (_enforceContainerRestrictions(actor, container, itemData) === false)) return false;
+  }
 
   // Quantity increase
-  if (changes?.system?.quantity != null && newCid && newCid === currentCid) {
-    const newQty = num(changes.system.quantity, getItemQuantity(item));
+  const quantityChange = getChangeProperty(changes, "system.quantity");
+  if (quantityChange != null && newCid && newCid === currentCid) {
+    const newQty = num(quantityChange, getItemQuantity(item));
     const oldQty = getItemQuantity(item);
     if (newQty > oldQty) {
       const container = getItem(actor, newCid);
@@ -736,23 +1270,19 @@ function _enforceOnUpdate(item, changes) {
   }
 
   // Weight increase
-  const weightChange = changes?.system?.weight;
-  if (weightChange != null && currentCid) {
-    const container = getItem(actor, currentCid);
+  const weightChange = getChangeProperty(changes, "system.weight") ?? (
+    getChangeProperty(changes, "system.weight.value") !== undefined ? itemData?.system?.weight : undefined
+  );
+  if (weightChange != null && newCid) {
+    const container = getItem(actor, newCid);
     const capacityLbs = getCapacityLbs(container);
     if (capacityLbs) {
-      const { load: currentLbs } = computeAdjustedLoad(actor, currentCid);
+      const { load: currentLbs } = computeAdjustedLoad(actor, newCid);
       const reduction = getReductionPct(container) / 100;
       const oldTotalLbs = ownWeightLbs(item) * (1 - reduction);
-      let newUnitW = getItemUnitWeight(item);
-      let newUnits = getItemWeightUnits(item);
-      if (typeof weightChange === "object" && weightChange !== null) {
-        if (weightChange.value != null) newUnitW = num(weightChange.value, newUnitW);
-        if (weightChange.units != null) newUnits = weightChange.units;
-      } else {
-        newUnitW = num(weightChange, newUnitW);
-      }
-      const newTotalLbs = convertToLbs(newUnitW * getItemQuantity(item), newUnits) * (1 - reduction);
+      const newUnitW = getItemUnitWeight(itemData);
+      const newUnits = getItemWeightUnits(itemData);
+      const newTotalLbs = convertToLbs(newUnitW * getItemQuantity(itemData), newUnits) * (1 - reduction);
       const deltaLbs = Math.max(0, newTotalLbs - oldTotalLbs);
       if (deltaLbs > 0 && currentLbs + deltaLbs > capacityLbs) {
         _notifyExceed({ actorName: actor?.name, containerName: container?.name, capacityLbs, beforeLbs: currentLbs, deltaLbs });
@@ -793,10 +1323,6 @@ function _registerUIHooks() {
     debounceTimers.set(key, setTimeout(fn, delay));
   };
 
-  Hooks.on("getItemSheetHeaderButtons", (app, buttons) => {
-    _injectHeaderButton(app, buttons);
-  });
-
   // Inline gear only — no DOM capacity patching needed
   const onRender = (app, element) => {
     const el = element instanceof HTMLElement ? element : element?.[0] ?? element;
@@ -816,19 +1342,19 @@ function _registerUIHooks() {
     if (!actor) return;
     if (isContainer(item) || item.system?.container) {
       debouncedRender(`actor:${actor.id}`, () => {
-        if (actor.sheet?.rendered) actor.sheet.render(false);
+        renderApplication(actor.sheet, false);
       });
     }
     if (isContainer(item)) {
       debouncedRender(`item:${item.id}`, () => {
-        if (item.sheet?.rendered) item.sheet.render(false);
+        renderApplication(item.sheet, false);
       });
     }
     const cid = item.system?.container;
     if (cid) {
       const c = getItem(actor, cid);
       if (c?.sheet?.rendered) {
-        debouncedRender(`item:${cid}`, () => c.sheet.render(false));
+        debouncedRender(`item:${cid}`, () => renderApplication(c.sheet, false));
       }
     }
   });
@@ -839,30 +1365,13 @@ function _registerUIHooks() {
     const cid = item.system?.container;
     if (cid) {
       const c = getItem(actor, cid);
-      debouncedRender(`item:${cid}`, () => { if (c?.sheet?.rendered) c.sheet.render(false); });
+      debouncedRender(`item:${cid}`, () => renderApplication(c?.sheet, false));
     }
-    debouncedRender(`actor:${actor.id}`, () => { if (actor.sheet?.rendered) actor.sheet.render(false); });
+    debouncedRender(`actor:${actor.id}`, () => renderApplication(actor.sheet, false));
   };
 
   Hooks.on("createItem", onItemChange);
   Hooks.on("deleteItem", onItemChange);
-}
-
-function _injectHeaderButton(app, buttons) {
-  try {
-    const doc = app?.document ?? app?.item ?? app?.object;
-    if (!(doc instanceof Item) || doc.type !== "container") return;
-    if (!game.user.isGM) return;
-    if (buttons.some(b => b?.class === "wc-reduction-btn")) return;
-    buttons.unshift({
-      label: game.i18n.localize(`${MODULE_ID}.reductionBtn.label`),
-      class: "wc-reduction-btn",
-      icon: "fas fa-cog",
-      onclick: () => openReductionDialog(doc)
-    });
-  } catch (e) {
-    LOG.error("Header button injection failed", e);
-  }
 }
 
 function _ensureInlineGear(app, element) {
@@ -876,7 +1385,7 @@ function _ensureInlineGear(app, element) {
 
   const btn = document.createElement("span");
   btn.className = "wc-inline-gear";
-  btn.title = game.i18n.localize(`${MODULE_ID}.inlineGear.title`);
+  btn.title = game.i18n.localize(`${MODULE_ID}.configBtn.title`);
   btn.innerHTML = '<i class="fas fa-cog"></i>';
   btn.addEventListener("click", (e) => {
     e.preventDefault();
@@ -898,60 +1407,66 @@ async function openReductionDialog(containerItem) {
   }
 
   const cur = getReductionPct(containerItem);
-  const title = game.i18n.localize(`${MODULE_ID}.reductionDialog.title`);
+  const restrictions = getContainerRestrictions(containerItem);
+  const title = game.i18n.localize(`${MODULE_ID}.configDialog.title`);
   const saveLabel = game.i18n.localize(`${MODULE_ID}.reductionDialog.save`);
-  const fieldLabel = game.i18n.localize(`${MODULE_ID}.reductionDialog.label`);
-
   const content = `
-    <div style="display:flex; align-items:center; gap:8px; padding:4px 0;">
-      <label style="white-space:nowrap; font-weight:500;">${fieldLabel}</label>
-      <input type="number" name="pct" value="${cur}" min="0" max="100" step="1"
-             style="width:64px; text-align:center;" autofocus/>
+    <div class="wc-config-dialog">
+      <label class="wc-config-field">
+        ${game.i18n.localize(`${MODULE_ID}.reductionDialog.label`)}
+        <input type="number" name="reductionPct" value="${cur}" min="0" max="100" step="1" autofocus>
+      </label>
+      <div class="wc-config-field">
+        ${game.i18n.localize(`${MODULE_ID}.configDialog.allowedTypes.label`)}
+        ${renderCheckboxDropdown("allowedTypes", getRuleItemTypeGroups(), restrictions.allowedTypes)}
+        <span class="hint">${game.i18n.localize(`${MODULE_ID}.configDialog.allowedTypes.hint`)}</span>
+      </div>
+      <div class="wc-config-field">
+        ${game.i18n.localize(`${MODULE_ID}.configDialog.allowedSubtypes.label`)}
+        ${renderCheckboxDropdown("allowedSubtypes", getRuleSubtypeGroups(), restrictions.allowedSubtypes)}
+        <span class="hint">${game.i18n.localize(`${MODULE_ID}.configDialog.allowedSubtypes.hint`)}</span>
+      </div>
+      <div class="wc-config-field">
+        ${game.i18n.localize(`${MODULE_ID}.configDialog.requiredProperties.label`)}
+        ${renderCheckboxDropdown("requiredProperties", getRulePropertyGroups(), restrictions.requiredProperties)}
+        <span class="hint">${game.i18n.localize(`${MODULE_ID}.configDialog.requiredProperties.hint`)}</span>
+      </div>
     </div>`;
 
-  let pct = null;
-
-  if (foundry.applications?.api?.DialogV2) {
-    pct = await foundry.applications.api.DialogV2.prompt({
-      window: { title, minimizable: false },
-      content,
-      ok: {
-        label: saveLabel,
-        callback: (event, button, dialog) => {
-          const root = dialog?.element ?? dialog;
-          const el = root instanceof HTMLElement ? root : document.body;
-          const input = el.querySelector('input[name="pct"]');
-          const val = Number(input?.value);
-          return Math.clamp(Math.round(Number.isFinite(val) ? val : 0), 0, 100);
-        }
-      },
-      rejectClose: false
-    });
-  } else {
-    pct = await Dialog.prompt({
-      title,
-      content,
+  const config = await foundry.applications.api.DialogV2.prompt({
+    window: { title, minimizable: false },
+    content,
+    ok: {
       label: saveLabel,
-      callback: (html) => {
-        const el = html instanceof HTMLElement ? html : html[0] ?? html;
-        const input = el.querySelector('input[name="pct"]');
-        const val = Number(input?.value);
-        return Math.clamp(Math.round(Number.isFinite(val) ? val : 0), 0, 100);
-      },
-      rejectClose: false
-    });
-  }
+      callback: (event, button, dialog) => {
+        const root = dialog?.element ?? button?.form ?? event?.currentTarget?.closest?.(".application");
+        const pctValue = Number(root?.querySelector?.('input[name="reductionPct"]')?.value);
+        return {
+          reductionPct: Math.clamp(Math.round(Number.isFinite(pctValue) ? pctValue : 0), 0, 100),
+          allowedTypes: getSelectedTokens(root, "allowedTypes"),
+          allowedSubtypes: getSelectedTokens(root, "allowedSubtypes"),
+          requiredProperties: getSelectedTokens(root, "requiredProperties")
+        };
+      }
+    },
+    rejectClose: false
+  });
 
-  if (pct == null) return;
+  if (!config) return;
 
   if (containerItem.parent && wcSocket._ready) {
-    await wcSocket.executeAsGM("updateReductionPct", `${containerItem.parent.id}.${containerItem.id}`, pct);
+    await wcSocket.executeAsGM("updateContainerConfig", `${containerItem.parent.id}.${containerItem.id}`, config);
   } else {
-    await containerItem.update({ [`flags.${MODULE_ID}.reductionPct`]: pct });
+    await containerItem.update({
+      [`flags.${MODULE_ID}.reductionPct`]: config.reductionPct,
+      [`flags.${MODULE_ID}.allowedTypes`]: config.allowedTypes,
+      [`flags.${MODULE_ID}.allowedSubtypes`]: config.allowedSubtypes,
+      [`flags.${MODULE_ID}.requiredProperties`]: config.requiredProperties
+    });
   }
 
   ui.notifications?.info(
-    game.i18n.format(`${MODULE_ID}.reductionSet.notification`, { pct, containerName: containerItem.name })
+    game.i18n.format(`${MODULE_ID}.configSet.notification`, { containerName: containerItem.name })
   );
 }
 
@@ -966,15 +1481,13 @@ Hooks.once("ready", () => {
     buildContainerIndex,
     getCapacityLbs,
     getReductionPct,
+    getContainerRestrictions,
+    validateContainerRestrictions,
 
     _findOpenApps() {
       const apps = [];
       if (foundry.applications?.instances instanceof Map) {
         for (const app of foundry.applications.instances.values()) apps.push(app);
-      }
-      if (ui.windows) {
-        const iter = ui.windows instanceof Map ? ui.windows.values() : Object.values(ui.windows);
-        for (const app of iter) apps.push(app);
       }
       return apps;
     },
@@ -1015,6 +1528,7 @@ Hooks.once("ready", () => {
       const sys = item.system;
       console.group(`%cContainer: ${item.name} (${item.id})`, "color: #4CAF50; font-weight: bold");
       console.log("Reduction:", getReductionPct(item) + "%");
+      console.log("Restrictions:", getContainerRestrictions(item));
       console.log("system.capacity:", foundry.utils.deepClone(sys.capacity));
       console.log("system.weight:", foundry.utils.deepClone(sys.weight));
 
