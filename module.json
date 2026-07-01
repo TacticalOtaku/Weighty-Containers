@@ -1,11 +1,11 @@
 {
   "id": "weighty-containers",
   "title": "Weighty Containers",
-  "description": "Manages container weight capacity, allows weight reduction for items inside, and adjusts actor encumbrance display. Full Foundry v13 and dnd5e 5.2.x support.",
-  "version": "3.0.1",
+  "description": "Manages container weight capacity, allows weight reduction for items inside, restricts container contents by item type/subtype, and adjusts actor encumbrance display. Full Foundry v14 and dnd5e 5.3.3 support.",
+  "version": "3.1.0",
   "compatibility": {
-    "minimum": "13",
-    "verified": "13.351"
+    "minimum": "14",
+    "verified": "14.363"
   },
   "authors": [
     {
@@ -18,8 +18,8 @@
         "id": "dnd5e",
         "type": "system",
         "compatibility": {
-          "minimum": "5.1.0",
-          "verified": "5.2.5"
+          "minimum": "5.3.3",
+          "verified": "5.3.3"
         }
       }
     ],
@@ -60,6 +60,6 @@
   ],
   "url": "https://github.com/TacticalOtaku/Weighty-Containers",
   "manifest": "https://raw.githubusercontent.com/TacticalOtaku/Weighty-Containers/main/module.json",
-  "download": "https://github.com/TacticalOtaku/Weighty-Containers/releases/download/v3.0.1/weighty-containers-v3.0.1.zip",
+  "download": "https://github.com/TacticalOtaku/Weighty-Containers/releases/download/v3.1.0/weighty-containers-v3.1.0.zip",
   "socket": true
 }
