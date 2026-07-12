@@ -243,10 +243,6 @@ function parseTokenList(value) {
     .filter(Boolean);
 }
 
-function formatTokenList(values) {
-  return Array.isArray(values) ? values.join(", ") : "";
-}
-
 function localizeConfigLabel(label, fallback = null) {
   if (!label) return fallback ?? "";
   return game.i18n.localize(String(label));
@@ -320,29 +316,38 @@ function getRuleItemTypeGroups() {
 function getRuleSubtypeGroups() {
   const dnd5e = CONFIG.DND5E ?? {};
   const groups = [];
-  const addGroup = (key, labelKey) => {
+  const addGroup = (key, labelKey, types = []) => {
     const options = optionsFromConfig(dnd5e[key]);
-    if (options.length) groups.push({ label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.${labelKey}`), options });
+    if (options.length) groups.push({
+      key,
+      label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.${labelKey}`),
+      options,
+      types
+    });
   };
 
   groups.push({
+    key: "weaponRange",
     label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.weaponRange`),
+    types: ["weapon"],
     options: [
       { value: "melee", label: game.i18n.localize(`${MODULE_ID}.configDialog.option.melee`) },
       { value: "ranged", label: game.i18n.localize(`${MODULE_ID}.configDialog.option.ranged`) }
     ]
   });
 
-  addGroup("weaponTypes", "weaponTypes");
-  addGroup("consumableTypes", "consumableTypes");
-  addGroup("equipmentTypes", "equipmentTypes");
-  addGroup("armorTypes", "armorTypes");
-  addGroup("toolTypes", "toolTypes");
-  addGroup("lootTypes", "lootTypes");
+  addGroup("weaponTypes", "weaponTypes", ["weapon"]);
+  addGroup("consumableTypes", "consumableTypes", ["consumable"]);
+  addGroup("equipmentTypes", "equipmentTypes", ["equipment"]);
+  addGroup("armorTypes", "armorTypes", ["equipment"]);
+  addGroup("toolTypes", "toolTypes", ["tool"]);
+  addGroup("lootTypes", "lootTypes", ["loot"]);
 
   if (!groups.some(g => g.options.length)) {
     groups.push({
+      key: "commonSubtypes",
       label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.commonSubtypes`),
+      types: [],
       options: [
         { value: "melee", label: game.i18n.localize(`${MODULE_ID}.configDialog.option.melee`) },
         { value: "ranged", label: game.i18n.localize(`${MODULE_ID}.configDialog.option.ranged`) },
@@ -368,7 +373,11 @@ function getRulePropertyGroups() {
       seen.add(option.value);
       return true;
     });
-    if (options.length) groups.push({ label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.${labelKey}`), options });
+    if (options.length) groups.push({
+      key,
+      label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.${labelKey}`),
+      options
+    });
   };
 
   addGroup("itemProperties", "itemProperties");
@@ -384,12 +393,17 @@ function getRulePropertyGroups() {
         seen.add(option.value);
         return true;
       });
-      if (options.length) groups.push({ label: localizeConfigLabel(`TYPES.Item.${itemType}`, itemType), options });
+      if (options.length) groups.push({
+        key: `validProperties-${itemType}`,
+        label: localizeConfigLabel(`TYPES.Item.${itemType}`, itemType),
+        options
+      });
     }
   }
 
   if (!groups.length) {
     groups.push({
+      key: "itemProperties",
       label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.itemProperties`),
       options: [
         { value: "amm", label: "Ammunition" },
@@ -411,108 +425,93 @@ function getRulePropertyGroups() {
   return groups;
 }
 
-function renderSelectOptions(groups, selectedValues) {
-  const selected = new Set(parseTokenList(selectedValues));
-  const selectedAttr = value => selected.has(normalizeToken(value)) ? " selected" : "";
-  const option = ({ value, label }) => `<option value="${_escapeHtml(value)}"${selectedAttr(value)}>${_escapeHtml(label)}</option>`;
-  return groups.map(group => {
-    const options = group.options.map(option).join("");
-    return `<optgroup label="${_escapeHtml(group.label)}">${options}</optgroup>`;
-  }).join("");
-}
-
-function summarizeLabels(labels) {
-  if (!labels.length) return game.i18n.localize(`${MODULE_ID}.configDialog.any`);
-  if (labels.length <= 2) return labels.join(", ");
-  return game.i18n.format(`${MODULE_ID}.configDialog.selectedSummary`, {
-    first: labels.slice(0, 2).join(", "),
-    count: labels.length - 2
-  });
-}
-
-function selectedLabelsFromGroups(groups, selectedValues) {
-  const selected = new Set(parseTokenList(selectedValues));
-  const labels = [];
-  for (const group of groups) {
-    for (const option of group.options) {
-      if (selected.has(normalizeToken(option.value))) labels.push(option.label);
-    }
-  }
-  return labels;
-}
-
-function renderCheckboxDropdown(name, groups, selectedValues) {
+function prepareRuleGroups(groups, selectedValues) {
   const selected = new Set(parseTokenList(selectedValues));
   const known = new Set(groups.flatMap(group => group.options.map(option => normalizeToken(option.value))));
   const unknownOptions = Array.from(selected)
     .filter(value => !known.has(value))
     .map(value => ({ value, label: value }));
-  const allGroups = unknownOptions.length
-    ? [...groups, { label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.savedValues`), options: unknownOptions }]
-    : groups;
+  if (!unknownOptions.length) return groups;
+  return [...groups, {
+    key: "savedValues",
+    label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.savedValues`),
+    options: unknownOptions,
+    saved: true,
+    types: []
+  }];
+}
+
+function renderRuleMultiselect({ name, groups, selectedValues, placeholder }) {
+  const selected = new Set(parseTokenList(selectedValues));
+  const allGroups = prepareRuleGroups(groups, selectedValues);
+  const panelId = `wc-${name}-options`;
   const checkedAttr = value => selected.has(normalizeToken(value)) ? " checked" : "";
-  const summary = summarizeLabels(selectedLabelsFromGroups(allGroups, selectedValues));
-  const groupMarkup = allGroups.map(group => {
-    const options = group.options.map(option => `
-      <label class="wc-check-row">
-        <input type="checkbox" name="${_escapeHtml(name)}" value="${_escapeHtml(option.value)}"
-               data-label="${_escapeHtml(option.label)}"${checkedAttr(option.value)}>
-        <span>${_escapeHtml(option.label)}</span>
-      </label>`).join("");
+  const groupMarkup = allGroups.map((group, groupIndex) => {
+    const groupKey = group.key ?? `group-${groupIndex}`;
+    const groupTypes = (group.types ?? []).map(normalizeToken).filter(Boolean).join(" ");
+    const options = group.options.map(option => {
+      const value = normalizeToken(option.value);
+      return `
+        <label class="cr-option-row" data-search="${_escapeHtml(`${option.label} ${value}`.toLocaleLowerCase())}">
+          <input type="checkbox" name="${_escapeHtml(name)}" value="${_escapeHtml(value)}"
+                 data-label="${_escapeHtml(option.label)}"${checkedAttr(value)}>
+          <span class="cr-checkbox-mark" aria-hidden="true"><i class="fas fa-check"></i></span>
+          <span class="cr-option-label">${_escapeHtml(option.label)}</span>
+        </label>`;
+    }).join("");
     return `
-      <div class="wc-check-group">
-        <div class="wc-check-group-title">${_escapeHtml(group.label)}</div>
-        ${options}
-      </div>`;
+      <section class="cr-option-group" data-group="${_escapeHtml(groupKey)}"
+               data-types="${_escapeHtml(groupTypes)}"${group.saved ? ' data-saved="true"' : ""}>
+        <label class="cr-option-group-header">
+          <input type="checkbox" data-group-toggle="true">
+          <span class="cr-checkbox-mark" aria-hidden="true"><i class="fas fa-check"></i></span>
+          <span>${_escapeHtml(group.label)}</span>
+          <span class="cr-group-count" aria-hidden="true"></span>
+        </label>
+        <div class="cr-option-group-items">${options}</div>
+      </section>`;
   }).join("");
 
   return `
-    <details class="wc-check-dropdown" data-name="${_escapeHtml(name)}">
-      <summary>
-        <span class="wc-selection-text" data-placeholder="${_escapeHtml(game.i18n.localize(`${MODULE_ID}.configDialog.any`))}">
-          ${_escapeHtml(summary)}
-        </span>
-      </summary>
-      <div class="wc-check-panel">
-        ${groupMarkup}
+    <div class="cr-multiselect" data-select="${_escapeHtml(name)}" data-placeholder="${_escapeHtml(placeholder)}">
+      <div class="cr-combobox" role="combobox" tabindex="0" aria-haspopup="listbox"
+           aria-expanded="false" aria-controls="${panelId}">
+        <div class="cr-selection" data-selection></div>
+        <button type="button" class="cr-icon-button cr-select-clear" data-action="clearSelect"
+                data-select-name="${_escapeHtml(name)}" aria-label="${_escapeHtml(game.i18n.localize(`${MODULE_ID}.configDialog.actions.clear`))}"
+                title="${_escapeHtml(game.i18n.localize(`${MODULE_ID}.configDialog.actions.clear`))}">
+          <i class="fas fa-xmark"></i>
+        </button>
+        <button type="button" class="cr-icon-button cr-select-toggle" data-action="toggleSelect"
+                data-select-name="${_escapeHtml(name)}" aria-label="${_escapeHtml(game.i18n.localize(`${MODULE_ID}.configDialog.actions.open`))}">
+          <i class="fas fa-chevron-down"></i>
+        </button>
       </div>
-    </details>`;
-}
-
-function getSelectedTokens(root, name) {
-  const checkboxes = root?.querySelectorAll?.(`input[type="checkbox"][name="${name}"]:checked`) ?? [];
-  if (checkboxes.length) {
-    return Array.from(checkboxes)
-      .map(input => normalizeToken(input.value))
-      .filter(Boolean);
-  }
-
-  const select = root?.querySelector?.(`select[name="${name}"]`);
-  if (!select) return [];
-  return Array.from(select.selectedOptions ?? [])
-    .map(option => normalizeToken(option.value))
-    .filter(Boolean);
-}
-
-function updateCheckDropdownSummary(dropdown) {
-  const text = dropdown?.querySelector?.(".wc-selection-text");
-  if (!text) return;
-  const labels = Array.from(dropdown.querySelectorAll('input[type="checkbox"]:checked'))
-    .map(input => input.dataset.label || input.value)
-    .filter(Boolean);
-  const summary = summarizeLabels(labels);
-  text.textContent = summary;
-  text.title = labels.join(", ");
-}
-
-function registerCheckDropdownListeners() {
-  if (registerCheckDropdownListeners.ready) return;
-  registerCheckDropdownListeners.ready = true;
-  document.addEventListener("change", (event) => {
-    const checkbox = event.target?.closest?.('.wc-check-dropdown input[type="checkbox"]');
-    if (!checkbox) return;
-    updateCheckDropdownSummary(checkbox.closest(".wc-check-dropdown"));
-  });
+      <div id="${panelId}" class="cr-select-panel" role="listbox" aria-multiselectable="true"
+           popover="manual" hidden>
+        <div class="cr-select-toolbar">
+          <label class="cr-search">
+            <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+            <input type="search" data-select-search autocomplete="off"
+                   placeholder="${_escapeHtml(game.i18n.localize(`${MODULE_ID}.configDialog.search`))}">
+          </label>
+          <div class="cr-select-actions">
+            <button type="button" data-action="selectVisible" data-select-name="${_escapeHtml(name)}">
+              ${_escapeHtml(game.i18n.localize(`${MODULE_ID}.configDialog.actions.selectVisible`))}
+            </button>
+            <button type="button" data-action="deselectVisible" data-select-name="${_escapeHtml(name)}">
+              ${_escapeHtml(game.i18n.localize(`${MODULE_ID}.configDialog.actions.deselectVisible`))}
+            </button>
+            <button type="button" data-action="clearSelect" data-select-name="${_escapeHtml(name)}">
+              ${_escapeHtml(game.i18n.localize(`${MODULE_ID}.configDialog.actions.clear`))}
+            </button>
+            <span class="cr-select-total" data-select-total></span>
+          </div>
+        </div>
+        <div class="cr-options">${groupMarkup}</div>
+        <div class="cr-select-result" data-select-result></div>
+      </div>
+    </div>`;
 }
 
 function getContainerRestrictions(containerItem) {
@@ -520,8 +519,36 @@ function getContainerRestrictions(containerItem) {
   return {
     allowedTypes: parseTokenList(flags.allowedTypes),
     allowedSubtypes: parseTokenList(flags.allowedSubtypes),
-    requiredProperties: parseTokenList(flags.requiredProperties)
+    requiredProperties: parseTokenList(flags.requiredProperties),
+    forbiddenProperties: parseTokenList(flags.forbiddenProperties),
+    propertyMatchMode: flags.propertyMatchMode === "any" ? "any" : "all"
   };
+}
+
+function makeContainerConfigUpdate(config) {
+  return {
+    [`flags.${MODULE_ID}.reductionPct`]: Math.clamp(Math.round(num(config.reductionPct, 0)), 0, 100),
+    [`flags.${MODULE_ID}.allowedTypes`]: parseTokenList(config.allowedTypes),
+    [`flags.${MODULE_ID}.allowedSubtypes`]: parseTokenList(config.allowedSubtypes),
+    [`flags.${MODULE_ID}.requiredProperties`]: parseTokenList(config.requiredProperties),
+    [`flags.${MODULE_ID}.forbiddenProperties`]: parseTokenList(config.forbiddenProperties),
+    [`flags.${MODULE_ID}.propertyMatchMode`]: config.propertyMatchMode === "any" ? "any" : "all"
+  };
+}
+
+function containerConfigMatches(containerItem, config) {
+  const saved = getContainerRestrictions(containerItem);
+  const sameTokens = (left, right) => {
+    const a = Array.from(new Set(parseTokenList(left))).sort();
+    const b = Array.from(new Set(parseTokenList(right))).sort();
+    return a.length === b.length && a.every((value, index) => value === b[index]);
+  };
+  return getReductionPct(containerItem) === Math.clamp(Math.round(num(config.reductionPct, 0)), 0, 100)
+    && sameTokens(saved.allowedTypes, config.allowedTypes)
+    && sameTokens(saved.allowedSubtypes, config.allowedSubtypes)
+    && sameTokens(saved.requiredProperties, config.requiredProperties)
+    && sameTokens(saved.forbiddenProperties, config.forbiddenProperties)
+    && saved.propertyMatchMode === (config.propertyMatchMode === "any" ? "any" : "all");
 }
 
 function getChangeProperty(changes, path) {
@@ -590,7 +617,10 @@ function getItemMatchTokens(itemData) {
 
 function validateContainerRestrictions(containerItem, itemData) {
   const restrictions = getContainerRestrictions(containerItem);
-  if (!restrictions.allowedTypes.length && !restrictions.allowedSubtypes.length && !restrictions.requiredProperties.length) {
+  if (!restrictions.allowedTypes.length
+      && !restrictions.allowedSubtypes.length
+      && !restrictions.requiredProperties.length
+      && !restrictions.forbiddenProperties.length) {
     return { ok: true, restrictions };
   }
 
@@ -604,8 +634,16 @@ function validateContainerRestrictions(containerItem, itemData) {
     return { ok: false, reason: "subtype", restrictions };
   }
 
-  if (restrictions.requiredProperties.length && !restrictions.requiredProperties.every(token => matchTokens.has(token))) {
+  const propertyTokens = getItemPropertyTokens(itemData);
+  const requiredMatches = restrictions.propertyMatchMode === "any"
+    ? restrictions.requiredProperties.some(token => propertyTokens.has(token))
+    : restrictions.requiredProperties.every(token => propertyTokens.has(token));
+  if (restrictions.requiredProperties.length && !requiredMatches) {
     return { ok: false, reason: "property", restrictions };
+  }
+
+  if (restrictions.forbiddenProperties.some(token => propertyTokens.has(token))) {
+    return { ok: false, reason: "forbiddenProperty", restrictions };
   }
 
   return { ok: true, restrictions };
@@ -621,6 +659,9 @@ function _makeRestrictionMessage({ containerName, itemName, restrictions }) {
   }));
   if (restrictions.requiredProperties.length) details.push(game.i18n.format(`${MODULE_ID}.restrictionMessage.properties`, {
     properties: restrictions.requiredProperties.join(", ")
+  }));
+  if (restrictions.forbiddenProperties.length) details.push(game.i18n.format(`${MODULE_ID}.restrictionMessage.forbiddenProperties`, {
+    properties: restrictions.forbiddenProperties.join(", ")
   }));
 
   return game.i18n.format(`${MODULE_ID}.restrictionMessage.default`, {
@@ -813,103 +854,6 @@ Hooks.once("init", () => {
     type: String, default: ""
   });
 
-  // CSS
-  const styleId = `${MODULE_ID}-css`;
-  if (!document.getElementById(styleId)) {
-    const style = document.createElement("style");
-    style.id = styleId;
-    style.textContent = `
-      .wc-inline-gear {
-        display: inline-flex; align-items: center; justify-content: center;
-        width: 22px; height: 22px; border-radius: 4px;
-        border: 1px solid rgba(0,0,0,.15); background: rgba(0,0,0,.06);
-        cursor: pointer; margin-left: 0.25rem;
-      }
-      .wc-inline-gear:hover { background: rgba(0,0,0,.12); }
-      .wc-config-dialog {
-        display: grid; gap: 12px; min-width: 360px;
-      }
-      .wc-config-field {
-        display: grid; gap: 4px; font-weight: 600;
-      }
-      .wc-config-dialog input {
-        width: 100%;
-      }
-      .wc-check-dropdown {
-        position: relative;
-        width: 100%;
-        font-weight: 400;
-      }
-      .wc-check-dropdown summary {
-        align-items: center;
-        background: var(--color-bg-option, rgba(255,255,255,.08));
-        border: 1px solid var(--color-border-light-tertiary, rgba(255,255,255,.22));
-        border-radius: 4px;
-        cursor: pointer;
-        display: flex;
-        gap: 0.5rem;
-        min-height: 2rem;
-        padding: 0.35rem 0.55rem;
-      }
-      .wc-check-dropdown summary::marker {
-        color: var(--color-text-light-highlight, currentColor);
-      }
-      .wc-selection-text {
-        flex: 1;
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .wc-check-panel {
-        background: var(--color-bg, #1f1b24);
-        border: 1px solid var(--color-border-highlight, rgba(255,255,255,.28));
-        border-radius: 4px;
-        box-shadow: 0 8px 18px rgba(0,0,0,.35);
-        box-sizing: border-box;
-        left: 0;
-        margin-top: 2px;
-        max-height: 14rem;
-        overflow: auto;
-        padding: 0.35rem 0;
-        position: absolute;
-        right: 0;
-        z-index: 20;
-      }
-      .wc-check-group + .wc-check-group {
-        border-top: 1px solid rgba(255,255,255,.12);
-        margin-top: 0.25rem;
-        padding-top: 0.25rem;
-      }
-      .wc-check-group-title {
-        color: var(--color-text-light-heading, currentColor);
-        font-weight: 700;
-        padding: 0.25rem 0.65rem;
-      }
-      .wc-check-row {
-        align-items: center;
-        display: flex;
-        gap: 0.5rem;
-        margin: 0;
-        padding: 0.25rem 0.65rem;
-      }
-      .wc-check-row:hover {
-        background: rgba(255,255,255,.08);
-      }
-      .wc-check-row input {
-        flex: 0 0 auto;
-        width: auto;
-      }
-      .wc-config-dialog .hint {
-        color: var(--color-text-dark-secondary, #666);
-        font-size: 0.85em;
-        font-weight: 400;
-      }
-    `;
-    document.head.appendChild(style);
-  }
-  registerCheckDropdownListeners();
-
   try {
     LOG.setLevel(game.settings.get(MODULE_ID, "logLevel"));
     LOG.withStacks = game.settings.get(MODULE_ID, "logStacks");
@@ -947,12 +891,7 @@ async function _socketUpdateContainerConfig(containerId, config) {
   if (!actor) return;
   const container = getItem(actor, itemId);
   if (!container) return;
-  await container.update({
-    [`flags.${MODULE_ID}.reductionPct`]: config.reductionPct,
-    [`flags.${MODULE_ID}.allowedTypes`]: config.allowedTypes,
-    [`flags.${MODULE_ID}.allowedSubtypes`]: config.allowedSubtypes,
-    [`flags.${MODULE_ID}.requiredProperties`]: config.requiredProperties
-  });
+  await container.update(makeContainerConfigUpdate(config));
   LOG.info("Socket: container config updated", { container: container.name, config });
 }
 
@@ -1400,74 +1339,742 @@ function _ensureInlineGear(app, element) {
 
 // ══════════════════════ GM Dialog ══════════════════════
 
+const OPEN_CONTAINER_RULE_APPS = new Map();
+const ContainerRulesApplication = foundry.applications.api.HandlebarsApplicationMixin(
+  foundry.applications.api.ApplicationV2
+);
+
+class ContainerRulesApp extends ContainerRulesApplication {
+  static DEFAULT_OPTIONS = {
+    id: `${MODULE_ID}-rules`,
+    classes: ["container-rules"],
+    tag: "form",
+    position: { width: 880, height: 720 },
+    window: {
+      icon: "fas fa-gear",
+      minimizable: true,
+      resizable: true
+    },
+    form: {
+      closeOnSubmit: false,
+      handler: ContainerRulesApp._onSubmit
+    },
+    actions: {
+      cancel: ContainerRulesApp._cancel,
+      clearSelect: ContainerRulesApp._clearSelect,
+      deselectVisible: ContainerRulesApp._deselectVisible,
+      removeSelection: ContainerRulesApp._removeSelection,
+      removeUnavailable: ContainerRulesApp._removeUnavailable,
+      resolveConflict: ContainerRulesApp._resolveConflict,
+      scrollSection: ContainerRulesApp._scrollSection,
+      selectVisible: ContainerRulesApp._selectVisible,
+      showUnavailable: ContainerRulesApp._showUnavailable,
+      toggleSection: ContainerRulesApp._toggleSection,
+      toggleSelect: ContainerRulesApp._toggleSelect
+    }
+  };
+
+  static PARTS = {
+    content: { template: `modules/${MODULE_ID}/templates/container-rules.hbs` },
+    footer: { template: `modules/${MODULE_ID}/templates/container-rules-footer.hbs` }
+  };
+
+  constructor(containerItem, options = {}) {
+    const title = game.i18n.localize(`${MODULE_ID}.configDialog.title`);
+    super({
+      ...options,
+      id: `${MODULE_ID}-rules-${containerItem.parent?.id ?? "world"}-${containerItem.id}`,
+      window: { ...options.window, title }
+    });
+    this.containerItem = containerItem;
+    const restrictions = getContainerRestrictions(containerItem);
+    this.draft = {
+      reductionPct: getReductionPct(containerItem),
+      allowedTypes: [...restrictions.allowedTypes],
+      allowedSubtypes: [...restrictions.allowedSubtypes],
+      requiredProperties: [...restrictions.requiredProperties],
+      forbiddenProperties: [...restrictions.forbiddenProperties],
+      propertyMatchMode: restrictions.propertyMatchMode
+    };
+    this.catalogs = {
+      allowedTypes: getRuleItemTypeGroups(),
+      allowedSubtypes: getRuleSubtypeGroups(),
+      requiredProperties: getRulePropertyGroups(),
+      forbiddenProperties: getRulePropertyGroups()
+    };
+    this._initialSnapshot = this._snapshot();
+    this._dirty = false;
+    this._hasErrors = false;
+    this._closingAfterSave = false;
+    this._listenersAbort = null;
+  }
+
+  async _prepareContext(options) {
+    const context = await super._prepareContext(options);
+    const propertyGroups = this.catalogs.requiredProperties;
+    return {
+      ...context,
+      reductionPct: this.draft.reductionPct,
+      previewAfter: Math.max(0, 10 * (1 - this.draft.reductionPct / 100)).toLocaleString(game.i18n.lang, {
+        maximumFractionDigits: 1
+      }),
+      modeAll: this.draft.propertyMatchMode === "all",
+      modeAny: this.draft.propertyMatchMode === "any",
+      allowedTypesSelect: renderRuleMultiselect({
+        name: "allowedTypes",
+        groups: this.catalogs.allowedTypes,
+        selectedValues: this.draft.allowedTypes,
+        placeholder: game.i18n.localize(`${MODULE_ID}.configDialog.anyTypes`)
+      }),
+      allowedSubtypesSelect: renderRuleMultiselect({
+        name: "allowedSubtypes",
+        groups: this.catalogs.allowedSubtypes,
+        selectedValues: this.draft.allowedSubtypes,
+        placeholder: game.i18n.localize(`${MODULE_ID}.configDialog.anySubtypes`)
+      }),
+      requiredPropertiesSelect: renderRuleMultiselect({
+        name: "requiredProperties",
+        groups: propertyGroups,
+        selectedValues: this.draft.requiredProperties,
+        placeholder: game.i18n.localize(`${MODULE_ID}.configDialog.anyProperties`)
+      }),
+      forbiddenPropertiesSelect: renderRuleMultiselect({
+        name: "forbiddenProperties",
+        groups: this.catalogs.forbiddenProperties,
+        selectedValues: this.draft.forbiddenProperties,
+        placeholder: game.i18n.localize(`${MODULE_ID}.configDialog.anyProperties`)
+      })
+    };
+  }
+
+  async _onRender(context, options) {
+    await super._onRender(context, options);
+    this._listenersAbort?.abort();
+    this._listenersAbort = new AbortController();
+    const { signal } = this._listenersAbort;
+
+    this.element.addEventListener("change", event => this._onChange(event), { signal });
+    this.element.addEventListener("click", event => this._onLocalClick(event), { signal });
+    this.element.addEventListener("input", event => this._onInput(event), { signal });
+    this.element.addEventListener("keydown", event => this._onKeyDown(event), { signal });
+    this.element.querySelector(".cr-main")?.addEventListener("scroll", () => {
+      this._closeAllSelects();
+      this._updateActiveSection();
+    }, { signal, passive: true });
+    document.addEventListener("pointerdown", event => {
+      if (!this.element?.contains(event.target)) this._closeAllSelects();
+    }, { signal });
+    window.addEventListener("resize", () => this._closeAllSelects(), { signal, passive: true });
+
+    this._installDirtyIndicator();
+    this._refreshAll();
+  }
+
+  _onPosition(position) {
+    super._onPosition(position);
+    this._closeAllSelects();
+  }
+
+  async close(options = {}) {
+    const force = typeof options === "boolean" ? options : options?.force;
+    if (this._dirty && !force && !this._closingAfterSave) {
+      const confirmed = await foundry.applications.api.DialogV2.confirm({
+        window: { title: game.i18n.localize(`${MODULE_ID}.configDialog.unsaved.title`) },
+        content: `<p>${_escapeHtml(game.i18n.localize(`${MODULE_ID}.configDialog.unsaved.message`))}</p>`,
+        yes: { label: game.i18n.localize(`${MODULE_ID}.configDialog.unsaved.discard`) },
+        no: { label: game.i18n.localize(`${MODULE_ID}.configDialog.unsaved.continue`) },
+        rejectClose: false
+      });
+      if (!confirmed) return this;
+    }
+    this._listenersAbort?.abort();
+    return super.close(options);
+  }
+
+  static async _onSubmit(event, form, formData) {
+    await this._save();
+  }
+
+  static _cancel(event, target) {
+    return this.close();
+  }
+
+  static _clearSelect(event, target) {
+    this._setSelection(target.dataset.selectName, []);
+  }
+
+  static _selectVisible(event, target) {
+    this._bulkVisible(target.dataset.selectName, true);
+  }
+
+  static _deselectVisible(event, target) {
+    this._bulkVisible(target.dataset.selectName, false);
+  }
+
+  static _removeSelection(event, target) {
+    const name = target.dataset.selectName;
+    this._setSelection(name, this.draft[name].filter(value => value !== normalizeToken(target.dataset.token)));
+  }
+
+  static _removeUnavailable() {
+    const unavailable = new Set(this._getUnavailableSubtypeValues());
+    this._setSelection("allowedSubtypes", this.draft.allowedSubtypes.filter(value => !unavailable.has(value)));
+  }
+
+  static _resolveConflict(event, target) {
+    const keep = target.dataset.keep;
+    const removeFrom = keep === "requiredProperties" ? "forbiddenProperties" : "requiredProperties";
+    const conflicts = new Set(this._propertyConflicts());
+    this._setSelection(removeFrom, this.draft[removeFrom].filter(value => !conflicts.has(value)));
+  }
+
+  static _scrollSection(event, target) {
+    this._scrollToSection(target.dataset.section);
+  }
+
+  static _showUnavailable() {
+    const root = this._selectRoot("allowedSubtypes");
+    root?.classList.toggle("show-unavailable");
+    this._applySelectFilter(root);
+    if (root && !root.classList.contains("is-open")) this._openSelect(root);
+  }
+
+  static _toggleSection(event, target) {
+    if (this.element.getBoundingClientRect().width >= 600) return;
+    target.closest(".cr-section")?.classList.toggle("is-collapsed");
+  }
+
+  static _toggleSelect(event, target) {
+    const root = this._selectRoot(target.dataset.selectName);
+    if (!root) return;
+    root.classList.contains("is-open") ? this._closeSelect(root) : this._openSelect(root);
+  }
+
+  _onInput(event) {
+    const target = event.target;
+    if (target.matches("[data-select-search]")) {
+      this._applySelectFilter(target.closest(".cr-multiselect"));
+      return;
+    }
+    if (!target.matches('[name="reductionPct"], [name="reductionRange"]')) return;
+    const value = Math.clamp(Math.round(num(target.value, 0)), 0, 100);
+    this.draft.reductionPct = value;
+    for (const input of this.element.querySelectorAll('[name="reductionPct"], [name="reductionRange"]')) {
+      if (input !== target) input.value = value;
+    }
+    this._refreshPreview();
+    this._afterDraftChange();
+  }
+
+  _onChange(event) {
+    const target = event.target;
+    if (target.matches('[name="propertyMatchMode"]')) {
+      this.draft.propertyMatchMode = target.value === "any" ? "any" : "all";
+      this._afterDraftChange();
+      return;
+    }
+    if (target.matches("[data-group-toggle]")) {
+      const root = target.closest(".cr-multiselect");
+      const group = target.closest(".cr-option-group");
+      const name = root?.dataset.select;
+      if (!name || !group) return;
+      const values = new Set(this.draft[name]);
+      for (const input of group.querySelectorAll('.cr-option-row input[type="checkbox"]')) {
+        const token = normalizeToken(input.value);
+        target.checked ? values.add(token) : values.delete(token);
+      }
+      this._setSelection(name, Array.from(values));
+      return;
+    }
+    if (!target.matches('.cr-option-row input[type="checkbox"]')) return;
+    const root = target.closest(".cr-multiselect");
+    const name = root?.dataset.select;
+    if (!name) return;
+    const token = normalizeToken(target.value);
+    const values = new Set(this.draft[name]);
+    target.checked ? values.add(token) : values.delete(token);
+    this._setSelection(name, Array.from(values));
+  }
+
+  _onLocalClick(event) {
+    const combo = event.target.closest(".cr-combobox");
+    if (!combo || event.target.closest("button")) return;
+    const root = combo.closest(".cr-multiselect");
+    root.classList.contains("is-open") ? this._closeSelect(root) : this._openSelect(root);
+  }
+
+  _onKeyDown(event) {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      this.submit();
+      return;
+    }
+
+    const numeric = event.target.matches?.('[name="reductionPct"]') ? event.target : null;
+    if (numeric && event.shiftKey && ["ArrowUp", "ArrowDown"].includes(event.key)) {
+      event.preventDefault();
+      const delta = event.key === "ArrowUp" ? 5 : -5;
+      numeric.value = Math.clamp(num(numeric.value, 0) + delta, 0, 100);
+      numeric.dispatchEvent(new Event("input", { bubbles: true }));
+      return;
+    }
+
+    if (event.key === "Escape") {
+      const open = this.element.querySelector(".cr-multiselect.is-open");
+      if (open) {
+        event.preventDefault();
+        event.stopPropagation();
+        this._closeSelect(open);
+      }
+      return;
+    }
+
+    const combo = event.target.closest?.(".cr-combobox");
+    if (combo && ["Enter", " ", "ArrowDown"].includes(event.key)) {
+      event.preventDefault();
+      const root = combo.closest(".cr-multiselect");
+      if (!root.classList.contains("is-open")) this._openSelect(root);
+      if (event.key === "ArrowDown") this._focusSelectRow(root, 0);
+      return;
+    }
+
+    const rowInput = event.target.matches?.('.cr-option-row input[type="checkbox"]') ? event.target : null;
+    if (!rowInput || !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const root = rowInput.closest(".cr-multiselect");
+    const visible = this._visibleRowInputs(root);
+    const current = visible.indexOf(rowInput);
+    const index = event.key === "Home" ? 0
+      : event.key === "End" ? visible.length - 1
+        : Math.clamp(current + (event.key === "ArrowDown" ? 1 : -1), 0, visible.length - 1);
+    visible[index]?.focus();
+  }
+
+  _selectRoot(name) {
+    return this.element?.querySelector?.(`.cr-multiselect[data-select="${name}"]`) ?? null;
+  }
+
+  _snapshot() {
+    return JSON.stringify({
+      reductionPct: this.draft.reductionPct,
+      allowedTypes: [...this.draft.allowedTypes].sort(),
+      allowedSubtypes: [...this.draft.allowedSubtypes].sort(),
+      requiredProperties: [...this.draft.requiredProperties].sort(),
+      forbiddenProperties: [...this.draft.forbiddenProperties].sort(),
+      propertyMatchMode: this.draft.propertyMatchMode
+    });
+  }
+
+  _setSelection(name, values) {
+    if (!Object.hasOwn(this.draft, name)) return;
+    this.draft[name] = Array.from(new Set(parseTokenList(values)));
+    const root = this._selectRoot(name);
+    const selected = new Set(this.draft[name]);
+    for (const input of root?.querySelectorAll?.('.cr-option-row input[type="checkbox"]') ?? []) {
+      input.checked = selected.has(normalizeToken(input.value));
+    }
+    this._refreshMultiselect(root);
+    if (name === "allowedTypes") {
+      this._applySelectFilter(this._selectRoot("allowedSubtypes"));
+      this._refreshSubtypeWarning();
+    }
+    if (name === "allowedSubtypes") this._refreshSubtypeWarning();
+    this._refreshPropertyConflicts();
+    this._afterDraftChange();
+  }
+
+  _bulkVisible(name, checked) {
+    const root = this._selectRoot(name);
+    if (!root) return;
+    const values = new Set(this.draft[name]);
+    for (const input of this._visibleRowInputs(root)) {
+      const token = normalizeToken(input.value);
+      checked ? values.add(token) : values.delete(token);
+    }
+    this._setSelection(name, Array.from(values));
+  }
+
+  _visibleRowInputs(root) {
+    if (!root) return [];
+    return Array.from(root.querySelectorAll('.cr-option-row input[type="checkbox"]'))
+      .filter(input => !input.closest(".cr-option-row").hidden && !input.closest(".cr-option-group").hidden);
+  }
+
+  _refreshAll() {
+    for (const name of ["allowedTypes", "allowedSubtypes", "requiredProperties", "forbiddenProperties"]) {
+      this._refreshMultiselect(this._selectRoot(name));
+    }
+    this._applySelectFilter(this._selectRoot("allowedSubtypes"));
+    this._refreshSubtypeWarning();
+    this._refreshPropertyConflicts();
+    this._refreshPreview();
+    this._refreshSummary();
+    this._refreshBadges();
+    this._refreshDirtyState();
+  }
+
+  _refreshMultiselect(root) {
+    if (!root) return;
+    const name = root.dataset.select;
+    const selected = new Set(this.draft[name]);
+    const labels = this._selectionLabels(name);
+    const selection = root.querySelector("[data-selection]");
+    const visibleLabels = labels.slice(0, 3);
+    const chips = visibleLabels.map(({ value, label }) => `
+      <button type="button" class="cr-chip" data-action="removeSelection"
+              data-select-name="${_escapeHtml(name)}" data-token="${_escapeHtml(value)}"
+              title="${_escapeHtml(game.i18n.localize(`${MODULE_ID}.configDialog.actions.remove`))}">
+        <span>${_escapeHtml(label)}</span><i class="fas fa-xmark" aria-hidden="true"></i>
+      </button>`).join("");
+    const more = labels.length > 3 ? `<span class="cr-chip cr-chip-more">+${labels.length - 3}</span>` : "";
+    const placeholder = `<span class="cr-placeholder">${_escapeHtml(root.dataset.placeholder)}</span>`;
+    const mobile = `<span class="cr-mobile-selection">${_escapeHtml(game.i18n.format(`${MODULE_ID}.configDialog.selectedCount`, { count: labels.length }))}</span>`;
+    selection.innerHTML = labels.length ? `${chips}${more}${mobile}` : placeholder;
+    selection.title = labels.map(entry => entry.label).join(", ");
+
+    const clear = root.querySelector(".cr-select-clear");
+    if (clear) clear.hidden = selected.size === 0;
+    const uniqueOptions = new Set(Array.from(root.querySelectorAll('.cr-option-row input[type="checkbox"]'))
+      .map(input => normalizeToken(input.value)));
+    const total = root.querySelector("[data-select-total]");
+    if (total) total.textContent = game.i18n.format(`${MODULE_ID}.configDialog.selectedOf`, {
+      selected: selected.size,
+      total: uniqueOptions.size
+    });
+    const result = root.querySelector("[data-select-result]");
+    if (result) result.textContent = game.i18n.format(`${MODULE_ID}.configDialog.selectedCount`, { count: selected.size });
+
+    for (const row of root.querySelectorAll(".cr-option-row")) {
+      const input = row.querySelector('input[type="checkbox"]');
+      row.classList.toggle("is-selected", input.checked);
+      row.setAttribute("aria-selected", String(input.checked));
+    }
+    for (const group of root.querySelectorAll(".cr-option-group")) this._refreshGroupState(group);
+  }
+
+  _refreshGroupState(group) {
+    const inputs = Array.from(group.querySelectorAll('.cr-option-row input[type="checkbox"]'));
+    const checked = inputs.filter(input => input.checked).length;
+    const toggle = group.querySelector("[data-group-toggle]");
+    if (toggle) {
+      toggle.checked = inputs.length > 0 && checked === inputs.length;
+      toggle.indeterminate = checked > 0 && checked < inputs.length;
+    }
+    const count = group.querySelector(".cr-group-count");
+    if (count) count.textContent = `${checked} / ${inputs.length}`;
+  }
+
+  _selectionLabels(name) {
+    const labelMap = new Map();
+    for (const group of prepareRuleGroups(this.catalogs[name], this.draft[name])) {
+      for (const option of group.options) labelMap.set(normalizeToken(option.value), option.label);
+    }
+    return this.draft[name].map(value => ({ value, label: labelMap.get(value) ?? value }));
+  }
+
+  _applySelectFilter(root) {
+    if (!root) return;
+    const query = normalizeToken(root.querySelector("[data-select-search]")?.value);
+    const allowedTypes = new Set(this.draft.allowedTypes);
+    const showUnavailable = root.classList.contains("show-unavailable");
+    for (const group of root.querySelectorAll(".cr-option-group")) {
+      const groupTypes = parseTokenList(group.dataset.types?.replaceAll(" ", ","));
+      const typeAvailable = root.dataset.select !== "allowedSubtypes"
+        || !allowedTypes.size
+        || (!group.hasAttribute("data-saved") && (!groupTypes.length || groupTypes.some(type => allowedTypes.has(type))));
+      const allowHiddenSelection = showUnavailable && Array.from(group.querySelectorAll('.cr-option-row input[type="checkbox"]'))
+        .some(input => input.checked);
+      let visibleCount = 0;
+      for (const row of group.querySelectorAll(".cr-option-row")) {
+        const matchesSearch = !query || row.dataset.search.includes(query);
+        row.hidden = !(matchesSearch && (typeAvailable || (allowHiddenSelection && row.querySelector("input").checked)));
+        if (!row.hidden) visibleCount += 1;
+      }
+      group.hidden = visibleCount === 0;
+      group.classList.toggle("is-unavailable", !typeAvailable);
+      this._refreshGroupState(group);
+    }
+  }
+
+  _getUnavailableSubtypeValues() {
+    if (!this.draft.allowedTypes.length) return [];
+    const selectedTypes = new Set(this.draft.allowedTypes);
+    const available = new Set();
+    for (const group of this.catalogs.allowedSubtypes) {
+      const types = new Set((group.types ?? []).map(normalizeToken));
+      if (types.size && !Array.from(types).some(type => selectedTypes.has(type))) continue;
+      for (const option of group.options) available.add(normalizeToken(option.value));
+    }
+    return this.draft.allowedSubtypes.filter(value => !available.has(value));
+  }
+
+  _refreshSubtypeWarning() {
+    const values = this._getUnavailableSubtypeValues();
+    const warning = this.element.querySelector("[data-subtype-warning]");
+    if (!warning) return;
+    warning.hidden = values.length === 0;
+    const text = warning.querySelector("[data-warning-text]");
+    if (text) text.textContent = game.i18n.format(`${MODULE_ID}.configDialog.unavailableSubtypes`, { count: values.length });
+  }
+
+  _propertyConflicts() {
+    const forbidden = new Set(this.draft.forbiddenProperties);
+    return this.draft.requiredProperties.filter(value => forbidden.has(value));
+  }
+
+  _refreshPropertyConflicts() {
+    const conflicts = this._propertyConflicts();
+    this._hasErrors = conflicts.length > 0;
+    const labels = this._selectionLabels("requiredProperties")
+      .filter(entry => conflicts.includes(entry.value))
+      .map(entry => entry.label);
+    for (const name of ["requiredProperties", "forbiddenProperties"]) {
+      const root = this._selectRoot(name);
+      root?.classList.toggle("is-invalid", this._hasErrors);
+      root?.querySelector(".cr-combobox")?.setAttribute("aria-invalid", String(this._hasErrors));
+      const error = this.element.querySelector(`[data-property-error="${name}"]`);
+      if (!error) continue;
+      error.hidden = !this._hasErrors;
+      if (this._hasErrors) {
+        error.innerHTML = `${_escapeHtml(game.i18n.format(`${MODULE_ID}.configDialog.propertyConflict`, {
+          properties: labels.join(", ")
+        }))} <button type="button" data-action="resolveConflict" data-keep="${name}">${_escapeHtml(
+          game.i18n.localize(`${MODULE_ID}.configDialog.actions.moveHere`)
+        )}</button>`;
+      }
+    }
+    const save = this.element.querySelector("[data-save-button]");
+    if (save) {
+      save.disabled = this._hasErrors;
+      save.querySelector("span").textContent = game.i18n.localize(
+        `${MODULE_ID}.configDialog.${this._hasErrors ? "fixErrors" : "save"}`
+      );
+    }
+  }
+
+  _refreshPreview() {
+    const after = Math.max(0, 10 * (1 - this.draft.reductionPct / 100));
+    const value = this.element.querySelector("[data-preview-after]");
+    if (value) value.textContent = after.toLocaleString(game.i18n.lang, { maximumFractionDigits: 1 });
+  }
+
+  _refreshSummary() {
+    const summary = this.element.querySelector("[data-rule-summary]");
+    if (!summary) return;
+    const typeLabels = this._selectionLabels("allowedTypes").map(entry => entry.label);
+    const subtypeLabels = this._selectionLabels("allowedSubtypes").map(entry => entry.label);
+    const requiredLabels = this._selectionLabels("requiredProperties").map(entry => entry.label);
+    const forbiddenLabels = this._selectionLabels("forbiddenProperties").map(entry => entry.label);
+    const lines = [game.i18n.format(`${MODULE_ID}.configDialog.summary.reduction`, { pct: this.draft.reductionPct })];
+    lines.push(typeLabels.length
+      ? game.i18n.format(`${MODULE_ID}.configDialog.summary.types`, { values: typeLabels.join(", ") })
+      : game.i18n.localize(`${MODULE_ID}.configDialog.summary.anyTypes`));
+    if (subtypeLabels.length) lines.push(game.i18n.format(`${MODULE_ID}.configDialog.summary.subtypes`, {
+      values: subtypeLabels.join(", ")
+    }));
+    if (requiredLabels.length) lines.push(game.i18n.format(
+      `${MODULE_ID}.configDialog.summary.${this.draft.propertyMatchMode === "any" ? "requiredAny" : "requiredAll"}`,
+      { values: requiredLabels.join(", ") }
+    ));
+    if (forbiddenLabels.length) lines.push(game.i18n.format(`${MODULE_ID}.configDialog.summary.forbidden`, {
+      values: forbiddenLabels.join(", ")
+    }));
+    if (!requiredLabels.length && !forbiddenLabels.length) {
+      lines.push(game.i18n.localize(`${MODULE_ID}.configDialog.summary.noProperties`));
+    }
+    summary.replaceChildren(...lines.map(line => {
+      const paragraph = document.createElement("p");
+      paragraph.textContent = line;
+      return paragraph;
+    }));
+  }
+
+  _refreshBadges() {
+    const restrictionsCount = this.draft.allowedTypes.length + this.draft.allowedSubtypes.length;
+    const propertyCount = this.draft.requiredProperties.length + this.draft.forbiddenProperties.length;
+    const restrictions = this.element.querySelector('[data-nav-badge="restrictions"]');
+    const properties = this.element.querySelector('[data-nav-badge="properties"]');
+    if (restrictions) {
+      restrictions.textContent = restrictionsCount || "";
+      restrictions.hidden = restrictionsCount === 0;
+    }
+    if (properties) {
+      properties.textContent = this._hasErrors ? "!" : (propertyCount || "");
+      properties.hidden = !this._hasErrors && propertyCount === 0;
+      properties.classList.toggle("is-danger", this._hasErrors);
+    }
+  }
+
+  _afterDraftChange() {
+    this._refreshSummary();
+    this._refreshBadges();
+    this._refreshDirtyState();
+  }
+
+  _installDirtyIndicator() {
+    if (!this.window?.header || this.window.header.querySelector(".cr-dirty-state")) return;
+    const indicator = document.createElement("span");
+    indicator.className = "cr-dirty-state";
+    indicator.innerHTML = `<i class="fas fa-circle" aria-hidden="true"></i> ${_escapeHtml(
+      game.i18n.localize(`${MODULE_ID}.configDialog.changed`)
+    )}`;
+    indicator.hidden = true;
+    this.window.header.insertBefore(indicator, this.window.controls ?? this.window.close);
+  }
+
+  _refreshDirtyState() {
+    this._dirty = this._snapshot() !== this._initialSnapshot;
+    const indicator = this.window?.header?.querySelector(".cr-dirty-state");
+    if (indicator) indicator.hidden = !this._dirty;
+  }
+
+  _openSelect(root) {
+    this._closeAllSelects(root);
+    root.classList.add("is-open");
+    const panel = root.querySelector(".cr-select-panel");
+    panel.hidden = false;
+    try {
+      panel.showPopover?.();
+    } catch {
+      panel.removeAttribute("popover");
+    }
+    root.querySelector(".cr-combobox")?.setAttribute("aria-expanded", "true");
+    this._applySelectFilter(root);
+    this._positionSelectPanel(root);
+    requestAnimationFrame(() => root.querySelector("[data-select-search]")?.focus());
+  }
+
+  _closeSelect(root) {
+    if (!root) return;
+    root.classList.remove("is-open");
+    const panel = root.querySelector(".cr-select-panel");
+    if (panel) {
+      try {
+        if (panel.matches(":popover-open")) panel.hidePopover();
+      } catch {}
+      panel.hidden = true;
+      panel.removeAttribute("style");
+    }
+    root.querySelector(".cr-combobox")?.setAttribute("aria-expanded", "false");
+  }
+
+  _closeAllSelects(except = null) {
+    for (const root of this.element?.querySelectorAll?.(".cr-multiselect.is-open") ?? []) {
+      if (root !== except) this._closeSelect(root);
+    }
+  }
+
+  _positionSelectPanel(root) {
+    const combo = root.querySelector(".cr-combobox");
+    const panel = root.querySelector(".cr-select-panel");
+    if (!combo || !panel) return;
+    const rect = combo.getBoundingClientRect();
+    const below = window.innerHeight - rect.bottom - 12;
+    const above = rect.top - 12;
+    const openUp = below < 280 && above > below;
+    const available = Math.max(180, Math.min(380, openUp ? above : below));
+    Object.assign(panel.style, {
+      left: `${rect.left}px`,
+      width: `${rect.width}px`,
+      maxHeight: `${available}px`,
+      top: openUp ? "auto" : `${rect.bottom + 4}px`,
+      bottom: openUp ? `${window.innerHeight - rect.top + 4}px` : "auto"
+    });
+    root.classList.toggle("opens-up", openUp);
+  }
+
+  _focusSelectRow(root, index) {
+    this._visibleRowInputs(root)[index]?.focus();
+  }
+
+  _scrollToSection(name) {
+    const main = this.element.querySelector(".cr-main");
+    const section = this.element.querySelector(`[data-section="${name}"]`);
+    if (!main || !section) return;
+    section.classList.remove("is-collapsed");
+    const top = section.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop - 16;
+    main.scrollTo({
+      top: Math.max(0, top),
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"
+    });
+    section.querySelector("input, .cr-combobox")?.focus({ preventScroll: true });
+  }
+
+  _updateActiveSection() {
+    const main = this.element.querySelector(".cr-main");
+    if (!main) return;
+    const sections = Array.from(main.querySelectorAll(".cr-section"));
+    const mainTop = main.getBoundingClientRect().top;
+    const active = sections.reduce((current, section) => (
+      section.getBoundingClientRect().top - mainTop <= 90 ? section : current
+    ), sections[0]);
+    for (const nav of this.element.querySelectorAll(".cr-nav-button")) {
+      nav.classList.toggle("is-active", nav.dataset.section === active?.dataset.section);
+    }
+  }
+
+  async _save() {
+    this._refreshPropertyConflicts();
+    if (this._hasErrors) {
+      this._scrollToSection("properties");
+      this._selectRoot("requiredProperties")?.querySelector(".cr-combobox")?.focus();
+      return;
+    }
+
+    const config = {
+      reductionPct: this.draft.reductionPct,
+      allowedTypes: [...this.draft.allowedTypes],
+      allowedSubtypes: [...this.draft.allowedSubtypes],
+      requiredProperties: [...this.draft.requiredProperties],
+      forbiddenProperties: [...this.draft.forbiddenProperties],
+      propertyMatchMode: this.draft.propertyMatchMode
+    };
+
+    try {
+      const currentItem = this.containerItem.parent?.items?.get(this.containerItem.id) ?? this.containerItem;
+      await currentItem.update(makeContainerConfigUpdate(config));
+      const persistedItem = currentItem.parent?.items?.get(currentItem.id) ?? currentItem;
+      if (!containerConfigMatches(persistedItem, config)) {
+        throw new Error("Container configuration update completed without persisting the requested flags");
+      }
+      this.containerItem = persistedItem;
+    } catch (error) {
+      LOG.error("Failed to save container configuration", {
+        container: this.containerItem?.name,
+        uuid: this.containerItem?.uuid,
+        config,
+        error
+      });
+      ui.notifications?.error(game.i18n.localize(`${MODULE_ID}.configDialog.saveFailed`));
+      return;
+    }
+
+    this._initialSnapshot = this._snapshot();
+    this._dirty = false;
+    this._closingAfterSave = true;
+    ui.notifications?.info(game.i18n.format(`${MODULE_ID}.configSet.notification`, {
+      containerName: this.containerItem.name
+    }));
+    await this.close({ force: true });
+  }
+}
+
 async function openReductionDialog(containerItem) {
   if (!containerItem) {
     ui.notifications?.error(game.i18n.localize(`${MODULE_ID}.reductionDialog.errorNoItem`));
     return;
   }
-
-  const cur = getReductionPct(containerItem);
-  const restrictions = getContainerRestrictions(containerItem);
-  const title = game.i18n.localize(`${MODULE_ID}.configDialog.title`);
-  const saveLabel = game.i18n.localize(`${MODULE_ID}.reductionDialog.save`);
-  const content = `
-    <div class="wc-config-dialog">
-      <label class="wc-config-field">
-        ${game.i18n.localize(`${MODULE_ID}.reductionDialog.label`)}
-        <input type="number" name="reductionPct" value="${cur}" min="0" max="100" step="1" autofocus>
-      </label>
-      <div class="wc-config-field">
-        ${game.i18n.localize(`${MODULE_ID}.configDialog.allowedTypes.label`)}
-        ${renderCheckboxDropdown("allowedTypes", getRuleItemTypeGroups(), restrictions.allowedTypes)}
-        <span class="hint">${game.i18n.localize(`${MODULE_ID}.configDialog.allowedTypes.hint`)}</span>
-      </div>
-      <div class="wc-config-field">
-        ${game.i18n.localize(`${MODULE_ID}.configDialog.allowedSubtypes.label`)}
-        ${renderCheckboxDropdown("allowedSubtypes", getRuleSubtypeGroups(), restrictions.allowedSubtypes)}
-        <span class="hint">${game.i18n.localize(`${MODULE_ID}.configDialog.allowedSubtypes.hint`)}</span>
-      </div>
-      <div class="wc-config-field">
-        ${game.i18n.localize(`${MODULE_ID}.configDialog.requiredProperties.label`)}
-        ${renderCheckboxDropdown("requiredProperties", getRulePropertyGroups(), restrictions.requiredProperties)}
-        <span class="hint">${game.i18n.localize(`${MODULE_ID}.configDialog.requiredProperties.hint`)}</span>
-      </div>
-    </div>`;
-
-  const config = await foundry.applications.api.DialogV2.prompt({
-    window: { title, minimizable: false },
-    content,
-    ok: {
-      label: saveLabel,
-      callback: (event, button, dialog) => {
-        const root = dialog?.element ?? button?.form ?? event?.currentTarget?.closest?.(".application");
-        const pctValue = Number(root?.querySelector?.('input[name="reductionPct"]')?.value);
-        return {
-          reductionPct: Math.clamp(Math.round(Number.isFinite(pctValue) ? pctValue : 0), 0, 100),
-          allowedTypes: getSelectedTokens(root, "allowedTypes"),
-          allowedSubtypes: getSelectedTokens(root, "allowedSubtypes"),
-          requiredProperties: getSelectedTokens(root, "requiredProperties")
-        };
-      }
-    },
-    rejectClose: false
-  });
-
-  if (!config) return;
-
-  if (containerItem.parent && wcSocket._ready) {
-    await wcSocket.executeAsGM("updateContainerConfig", `${containerItem.parent.id}.${containerItem.id}`, config);
-  } else {
-    await containerItem.update({
-      [`flags.${MODULE_ID}.reductionPct`]: config.reductionPct,
-      [`flags.${MODULE_ID}.allowedTypes`]: config.allowedTypes,
-      [`flags.${MODULE_ID}.allowedSubtypes`]: config.allowedSubtypes,
-      [`flags.${MODULE_ID}.requiredProperties`]: config.requiredProperties
-    });
+  const key = containerItem.uuid ?? `${containerItem.parent?.id}.${containerItem.id}`;
+  const existing = OPEN_CONTAINER_RULE_APPS.get(key);
+  if (existing?.rendered) {
+    existing.bringToFront();
+    return existing;
   }
-
-  ui.notifications?.info(
-    game.i18n.format(`${MODULE_ID}.configSet.notification`, { containerName: containerItem.name })
-  );
+  const app = new ContainerRulesApp(containerItem);
+  OPEN_CONTAINER_RULE_APPS.set(key, app);
+  app.addEventListener("close", () => OPEN_CONTAINER_RULE_APPS.delete(key), { once: true });
+  await app.render({ force: true });
+  return app;
 }
 
 // ══════════════════════ Debug API ══════════════════════

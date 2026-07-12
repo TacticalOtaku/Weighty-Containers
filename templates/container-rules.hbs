@@ -1,0 +1,127 @@
+<div class="cr-layout">
+  <nav class="cr-nav" aria-label="{{localize 'weighty-containers.configDialog.navigation'}}">
+    <button type="button" class="cr-nav-button is-active" data-action="scrollSection" data-section="basic">
+      <i class="fas fa-sliders" aria-hidden="true"></i>
+      <span>{{localize "weighty-containers.configDialog.sections.basic"}}</span>
+    </button>
+    <button type="button" class="cr-nav-button" data-action="scrollSection" data-section="restrictions">
+      <i class="fas fa-shield-halved" aria-hidden="true"></i>
+      <span>{{localize "weighty-containers.configDialog.sections.restrictions"}}</span>
+      <span class="cr-nav-badge" data-nav-badge="restrictions" hidden></span>
+    </button>
+    <button type="button" class="cr-nav-button" data-action="scrollSection" data-section="properties">
+      <i class="fas fa-tag" aria-hidden="true"></i>
+      <span>{{localize "weighty-containers.configDialog.sections.properties"}}</span>
+      <span class="cr-nav-badge" data-nav-badge="properties" hidden></span>
+    </button>
+  </nav>
+
+  <main class="cr-main">
+    <section class="cr-section" data-section="basic">
+      <button type="button" class="cr-section-heading" data-action="toggleSection">
+        <span>{{localize "weighty-containers.configDialog.sections.basicTitle"}}</span>
+        <i class="fas fa-chevron-up" aria-hidden="true"></i>
+      </button>
+      <div class="cr-section-body">
+        <div class="cr-card cr-reduction-card">
+          <div class="cr-field-label">{{localize "weighty-containers.reductionDialog.label"}}</div>
+          <div class="cr-reduction-grid">
+            <label class="cr-number-control">
+              <input type="number" name="reductionPct" value="{{reductionPct}}" min="0" max="100" step="1">
+              <span>%</span>
+            </label>
+            <div class="cr-slider-wrap">
+              <input type="range" name="reductionRange" value="{{reductionPct}}" min="0" max="100" step="1"
+                     aria-label="{{localize 'weighty-containers.reductionDialog.label'}}">
+              <div class="cr-slider-scale" aria-hidden="true"><span>0%</span><span>50%</span><span>100%</span></div>
+            </div>
+            <div class="cr-preview" aria-live="polite">
+              <span>{{localize "weighty-containers.configDialog.previewWeight"}}</span>
+              <strong>10 <i class="fas fa-arrow-right-long" aria-hidden="true"></i> <b data-preview-after>{{previewAfter}}</b></strong>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="cr-section" data-section="restrictions">
+      <button type="button" class="cr-section-heading" data-action="toggleSection">
+        <span>{{localize "weighty-containers.configDialog.sections.restrictionsTitle"}}</span>
+        <i class="fas fa-chevron-up" aria-hidden="true"></i>
+      </button>
+      <div class="cr-section-body">
+        <div class="cr-card cr-fields-stack">
+          <div class="cr-field">
+            <div class="cr-field-label">{{localize "weighty-containers.configDialog.allowedTypes.label"}}</div>
+            {{{allowedTypesSelect}}}
+            <p class="cr-hint">{{localize "weighty-containers.configDialog.allowedTypes.shortHint"}}</p>
+          </div>
+          <div class="cr-field">
+            <div class="cr-field-label">{{localize "weighty-containers.configDialog.allowedSubtypes.label"}}</div>
+            {{{allowedSubtypesSelect}}}
+            <p class="cr-hint">{{localize "weighty-containers.configDialog.allowedSubtypes.shortHint"}}</p>
+            <div class="cr-warning" data-subtype-warning hidden>
+              <i class="fas fa-triangle-exclamation" aria-hidden="true"></i>
+              <span data-warning-text></span>
+              <button type="button" data-action="showUnavailable">{{localize "weighty-containers.configDialog.actions.show"}}</button>
+              <button type="button" data-action="removeUnavailable">{{localize "weighty-containers.configDialog.actions.removeUnavailable"}}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="cr-section" data-section="properties">
+      <button type="button" class="cr-section-heading" data-action="toggleSection">
+        <span>{{localize "weighty-containers.configDialog.sections.propertiesTitle"}}</span>
+        <i class="fas fa-chevron-up" aria-hidden="true"></i>
+      </button>
+      <div class="cr-section-body">
+        <div class="cr-properties-grid">
+          <div class="cr-card cr-field">
+            <div class="cr-field-label">
+              {{localize "weighty-containers.configDialog.requiredProperties.label"}}
+              <span class="cr-info" title="{{localize 'weighty-containers.configDialog.requiredProperties.hint'}}" tabindex="0">
+                <i class="fas fa-circle-info" aria-hidden="true"></i>
+              </span>
+            </div>
+            {{{requiredPropertiesSelect}}}
+            <p class="cr-hint">{{localize "weighty-containers.configDialog.requiredProperties.shortHint"}}</p>
+            <p class="cr-field-error" data-property-error="requiredProperties" hidden></p>
+          </div>
+          <div class="cr-card cr-field">
+            <div class="cr-field-label">
+              {{localize "weighty-containers.configDialog.forbiddenProperties.label"}}
+              <span class="cr-info" title="{{localize 'weighty-containers.configDialog.forbiddenProperties.hint'}}" tabindex="0">
+                <i class="fas fa-circle-info" aria-hidden="true"></i>
+              </span>
+            </div>
+            {{{forbiddenPropertiesSelect}}}
+            <p class="cr-hint">{{localize "weighty-containers.configDialog.forbiddenProperties.shortHint"}}</p>
+            <p class="cr-field-error" data-property-error="forbiddenProperties" hidden></p>
+          </div>
+        </div>
+
+        <div class="cr-card cr-match-card">
+          <div class="cr-field-label">{{localize "weighty-containers.configDialog.matchMode.label"}}</div>
+          <div class="cr-segmented" role="radiogroup" aria-label="{{localize 'weighty-containers.configDialog.matchMode.label'}}">
+            <label>
+              <input type="radio" name="propertyMatchMode" value="all" {{#if modeAll}}checked{{/if}}>
+              <span><i class="fas fa-circle-check" aria-hidden="true"></i>{{localize "weighty-containers.configDialog.matchMode.all"}}</span>
+            </label>
+            <label>
+              <input type="radio" name="propertyMatchMode" value="any" {{#if modeAny}}checked{{/if}}>
+              <span><i class="fas fa-circle-half-stroke" aria-hidden="true"></i>{{localize "weighty-containers.configDialog.matchMode.any"}}</span>
+            </label>
+          </div>
+          <p class="cr-hint">{{localize "weighty-containers.configDialog.matchMode.hint"}}</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="cr-rule-summary cr-card" aria-live="polite">
+      <h3>{{localize "weighty-containers.configDialog.summary.title"}}</h3>
+      <div data-rule-summary></div>
+    </section>
+  </main>
+</div>
