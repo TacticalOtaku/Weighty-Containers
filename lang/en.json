@@ -27,6 +27,7 @@
   "weighty-containers.inlineGear.title": "Container Weight Reduction",
   "weighty-containers.configDialog.title": "Container Rules",
   "weighty-containers.configDialog.navigation": "Rule sections",
+  "weighty-containers.configDialog.containerLabel": "Container",
   "weighty-containers.configDialog.changed": "Changed",
   "weighty-containers.configDialog.save": "Save",
   "weighty-containers.configDialog.saveFailed": "Could not save the container rule. See the console for details.",

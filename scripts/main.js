@@ -1407,6 +1407,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
     this._hasErrors = false;
     this._closingAfterSave = false;
     this._listenersAbort = null;
+    this._motionReady = false;
   }
 
   async _prepareContext(options) {
@@ -1414,6 +1415,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
     const propertyGroups = this.catalogs.requiredProperties;
     return {
       ...context,
+      containerName: this.containerItem.name,
       reductionPct: this.draft.reductionPct,
       previewAfter: Math.max(0, 10 * (1 - this.draft.reductionPct / 100)).toLocaleString(game.i18n.lang, {
         maximumFractionDigits: 1
@@ -1449,6 +1451,9 @@ class ContainerRulesApp extends ContainerRulesApplication {
 
   async _onRender(context, options) {
     await super._onRender(context, options);
+    const renderedElement = this.element;
+    this._motionReady = false;
+    renderedElement.classList.remove("cr-ready");
     this._listenersAbort?.abort();
     this._listenersAbort = new AbortController();
     const { signal } = this._listenersAbort;
@@ -1468,6 +1473,11 @@ class ContainerRulesApp extends ContainerRulesApplication {
 
     this._installDirtyIndicator();
     this._refreshAll();
+    requestAnimationFrame(() => {
+      if (this.element !== renderedElement || !renderedElement.isConnected) return;
+      renderedElement.classList.add("cr-ready");
+      this._motionReady = true;
+    });
   }
 
   _onPosition(position) {
@@ -1713,6 +1723,19 @@ class ContainerRulesApp extends ContainerRulesApplication {
     this._refreshDirtyState();
   }
 
+  _motionAllowed() {
+    return this._motionReady && !globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  }
+
+  _animate(element, keyframes, options = {}) {
+    if (!element || !this._motionAllowed() || typeof element.animate !== "function") return;
+    element.animate(keyframes, {
+      duration: 180,
+      easing: "cubic-bezier(.2, .8, .2, 1)",
+      ...options
+    });
+  }
+
   _refreshMultiselect(root) {
     if (!root) return;
     const name = root.dataset.select;
@@ -1729,8 +1752,18 @@ class ContainerRulesApp extends ContainerRulesApplication {
     const more = labels.length > 3 ? `<span class="cr-chip cr-chip-more">+${labels.length - 3}</span>` : "";
     const placeholder = `<span class="cr-placeholder">${_escapeHtml(root.dataset.placeholder)}</span>`;
     const mobile = `<span class="cr-mobile-selection">${_escapeHtml(game.i18n.format(`${MODULE_ID}.configDialog.selectedCount`, { count: labels.length }))}</span>`;
+    const previousCount = Number(root.dataset.selectionCount ?? -1);
     selection.innerHTML = labels.length ? `${chips}${more}${mobile}` : placeholder;
     selection.title = labels.map(entry => entry.label).join(", ");
+    root.dataset.selectionCount = String(labels.length);
+    if (previousCount >= 0 && previousCount !== labels.length) {
+      for (const [index, chip] of Array.from(selection.querySelectorAll(".cr-chip")).entries()) {
+        this._animate(chip, [
+          { opacity: .35, transform: "translateY(3px) scale(.96)" },
+          { opacity: 1, transform: "translateY(0) scale(1)" }
+        ], { delay: Math.min(index, 3) * 24 });
+      }
+    }
 
     const clear = root.querySelector(".cr-select-clear");
     if (clear) clear.hidden = selected.size === 0;
@@ -1855,7 +1888,17 @@ class ContainerRulesApp extends ContainerRulesApplication {
   _refreshPreview() {
     const after = Math.max(0, 10 * (1 - this.draft.reductionPct / 100));
     const value = this.element.querySelector("[data-preview-after]");
-    if (value) value.textContent = after.toLocaleString(game.i18n.lang, { maximumFractionDigits: 1 });
+    const formatted = after.toLocaleString(game.i18n.lang, { maximumFractionDigits: 1 });
+    const changed = value?.textContent !== formatted;
+    if (value) value.textContent = formatted;
+    const range = this.element.querySelector('[name="reductionRange"]');
+    range?.style.setProperty("--cr-range-progress", `${this.draft.reductionPct}%`);
+    if (changed) {
+      this._animate(value, [
+        { opacity: .45, transform: "translateY(3px) scale(.94)" },
+        { opacity: 1, transform: "translateY(0) scale(1)" }
+      ], { duration: 210 });
+    }
   }
 
   _refreshSummary() {
@@ -1887,6 +1930,10 @@ class ContainerRulesApp extends ContainerRulesApplication {
       paragraph.textContent = line;
       return paragraph;
     }));
+    this._animate(summary, [
+      { opacity: .55, transform: "translateY(2px)" },
+      { opacity: 1, transform: "translateY(0)" }
+    ]);
   }
 
   _refreshBadges() {
@@ -1923,9 +1970,18 @@ class ContainerRulesApp extends ContainerRulesApplication {
   }
 
   _refreshDirtyState() {
+    const wasDirty = this._dirty;
     this._dirty = this._snapshot() !== this._initialSnapshot;
     const indicator = this.window?.header?.querySelector(".cr-dirty-state");
-    if (indicator) indicator.hidden = !this._dirty;
+    if (indicator) {
+      indicator.hidden = !this._dirty;
+      if (!wasDirty && this._dirty) {
+        this._animate(indicator, [
+          { opacity: 0, transform: "translateX(5px)" },
+          { opacity: 1, transform: "translateX(0)" }
+        ], { duration: 220 });
+      }
+    }
   }
 
   _openSelect(root) {

@@ -27,6 +27,7 @@
   "weighty-containers.inlineGear.title": "Снижение веса контейнера",
   "weighty-containers.configDialog.title": "Правила контейнера",
   "weighty-containers.configDialog.navigation": "Разделы правила",
+  "weighty-containers.configDialog.containerLabel": "Контейнер",
   "weighty-containers.configDialog.changed": "Изменено",
   "weighty-containers.configDialog.save": "Сохранить",
   "weighty-containers.configDialog.saveFailed": "Не удалось сохранить правило контейнера. Подробности доступны в консоли.",
