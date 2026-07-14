@@ -1,5 +1,13 @@
 <div class="cr-layout">
   <nav class="cr-nav" aria-label="{{localize 'weighty-containers.configDialog.navigation'}}">
+    <div class="cr-nav-context">
+      <span class="cr-nav-context-icon" aria-hidden="true"><i class="fas fa-box-open"></i></span>
+      <span class="cr-nav-context-copy">
+        <small>{{localize "weighty-containers.configDialog.containerLabel"}}</small>
+        <strong title="{{containerName}}">{{containerName}}</strong>
+      </span>
+    </div>
+    <div class="cr-nav-divider" aria-hidden="true"></div>
     <button type="button" class="cr-nav-button is-active" data-action="scrollSection" data-section="basic">
       <i class="fas fa-sliders" aria-hidden="true"></i>
       <span>{{localize "weighty-containers.configDialog.sections.basic"}}</span>
@@ -19,12 +27,18 @@
   <main class="cr-main">
     <section class="cr-section" data-section="basic">
       <button type="button" class="cr-section-heading" data-action="toggleSection">
-        <span>{{localize "weighty-containers.configDialog.sections.basicTitle"}}</span>
+        <span class="cr-section-heading-copy">
+          <span class="cr-section-icon" aria-hidden="true"><i class="fas fa-sliders"></i></span>
+          <span>{{localize "weighty-containers.configDialog.sections.basicTitle"}}</span>
+        </span>
         <i class="fas fa-chevron-up" aria-hidden="true"></i>
       </button>
       <div class="cr-section-body">
         <div class="cr-card cr-reduction-card">
-          <div class="cr-field-label">{{localize "weighty-containers.reductionDialog.label"}}</div>
+          <div class="cr-card-titlebar">
+            <span class="cr-card-symbol cr-tone-weight" aria-hidden="true"><i class="fas fa-scale-balanced"></i></span>
+            <div class="cr-field-label">{{localize "weighty-containers.reductionDialog.label"}}</div>
+          </div>
           <div class="cr-reduction-grid">
             <label class="cr-number-control">
               <input type="number" name="reductionPct" value="{{reductionPct}}" min="0" max="100" step="1">
@@ -36,7 +50,7 @@
               <div class="cr-slider-scale" aria-hidden="true"><span>0%</span><span>50%</span><span>100%</span></div>
             </div>
             <div class="cr-preview" aria-live="polite">
-              <span>{{localize "weighty-containers.configDialog.previewWeight"}}</span>
+              <span><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i>{{localize "weighty-containers.configDialog.previewWeight"}}</span>
               <strong>10 <i class="fas fa-arrow-right-long" aria-hidden="true"></i> <b data-preview-after>{{previewAfter}}</b></strong>
             </div>
           </div>
@@ -46,7 +60,10 @@
 
     <section class="cr-section" data-section="restrictions">
       <button type="button" class="cr-section-heading" data-action="toggleSection">
-        <span>{{localize "weighty-containers.configDialog.sections.restrictionsTitle"}}</span>
+        <span class="cr-section-heading-copy">
+          <span class="cr-section-icon" aria-hidden="true"><i class="fas fa-shield-halved"></i></span>
+          <span>{{localize "weighty-containers.configDialog.sections.restrictionsTitle"}}</span>
+        </span>
         <i class="fas fa-chevron-up" aria-hidden="true"></i>
       </button>
       <div class="cr-section-body">
@@ -73,15 +90,20 @@
 
     <section class="cr-section" data-section="properties">
       <button type="button" class="cr-section-heading" data-action="toggleSection">
-        <span>{{localize "weighty-containers.configDialog.sections.propertiesTitle"}}</span>
+        <span class="cr-section-heading-copy">
+          <span class="cr-section-icon" aria-hidden="true"><i class="fas fa-tags"></i></span>
+          <span>{{localize "weighty-containers.configDialog.sections.propertiesTitle"}}</span>
+        </span>
         <i class="fas fa-chevron-up" aria-hidden="true"></i>
       </button>
       <div class="cr-section-body">
         <div class="cr-properties-grid">
-          <div class="cr-card cr-field">
+          <div class="cr-card cr-field cr-property-card cr-property-required">
             <div class="cr-field-label">
+              <span class="cr-field-symbol" aria-hidden="true"><i class="fas fa-circle-check"></i></span>
               {{localize "weighty-containers.configDialog.requiredProperties.label"}}
-              <span class="cr-info" title="{{localize 'weighty-containers.configDialog.requiredProperties.hint'}}" tabindex="0">
+              <span class="cr-info" title="{{localize 'weighty-containers.configDialog.requiredProperties.hint'}}"
+                    data-tooltip="{{localize 'weighty-containers.configDialog.requiredProperties.hint'}}" tabindex="0">
                 <i class="fas fa-circle-info" aria-hidden="true"></i>
               </span>
             </div>
@@ -89,10 +111,12 @@
             <p class="cr-hint">{{localize "weighty-containers.configDialog.requiredProperties.shortHint"}}</p>
             <p class="cr-field-error" data-property-error="requiredProperties" hidden></p>
           </div>
-          <div class="cr-card cr-field">
+          <div class="cr-card cr-field cr-property-card cr-property-forbidden">
             <div class="cr-field-label">
+              <span class="cr-field-symbol" aria-hidden="true"><i class="fas fa-circle-xmark"></i></span>
               {{localize "weighty-containers.configDialog.forbiddenProperties.label"}}
-              <span class="cr-info" title="{{localize 'weighty-containers.configDialog.forbiddenProperties.hint'}}" tabindex="0">
+              <span class="cr-info" title="{{localize 'weighty-containers.configDialog.forbiddenProperties.hint'}}"
+                    data-tooltip="{{localize 'weighty-containers.configDialog.forbiddenProperties.hint'}}" tabindex="0">
                 <i class="fas fa-circle-info" aria-hidden="true"></i>
               </span>
             </div>
@@ -120,7 +144,7 @@
     </section>
 
     <section class="cr-rule-summary cr-card" aria-live="polite">
-      <h3>{{localize "weighty-containers.configDialog.summary.title"}}</h3>
+      <h3><span aria-hidden="true"><i class="fas fa-sparkles"></i></span>{{localize "weighty-containers.configDialog.summary.title"}}</h3>
       <div data-rule-summary></div>
     </section>
   </main>

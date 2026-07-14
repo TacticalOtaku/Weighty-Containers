@@ -2,7 +2,7 @@
   "id": "weighty-containers",
   "title": "Weighty Containers",
   "description": "Manages container weight capacity, weight reduction, and content rules by item type, subtype, required properties, and forbidden properties. Full Foundry v14 and dnd5e 5.3.3 support.",
-  "version": "3.2.1",
+  "version": "3.3.0",
   "compatibility": {
     "minimum": "14",
     "verified": "14.363"
@@ -63,6 +63,6 @@
   ],
   "url": "https://github.com/TacticalOtaku/Weighty-Containers",
   "manifest": "https://raw.githubusercontent.com/TacticalOtaku/Weighty-Containers/main/module.json",
-  "download": "https://github.com/TacticalOtaku/Weighty-Containers/releases/download/v3.2.1/weighty-containers-v3.2.1.zip",
+  "download": "https://github.com/TacticalOtaku/Weighty-Containers/releases/download/v3.3.0/weighty-containers-v3.3.0.zip",
   "socket": true
 }
