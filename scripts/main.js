@@ -299,12 +299,17 @@ function valuesFromConfig(config) {
 
 function getRuleItemTypeGroups() {
   const itemTypes = new Map();
+  const addItemType = (type, label = null) => {
+    const token = normalizeToken(type);
+    if (!/^[a-z][a-z0-9_-]*$/.test(token) || token === "base") return;
+    addOption(itemTypes, token, typeof label === "string" ? label : `TYPES.Item.${token}`);
+  };
 
-  for (const type of valuesFromConfig(game.system?.documentTypes?.Item)) addOption(itemTypes, type, `TYPES.Item.${type}`);
-  for (const [type, label] of Object.entries(CONFIG.Item?.typeLabels ?? {})) addOption(itemTypes, type, label);
+  for (const type of valuesFromConfig(game.system?.documentTypes?.Item)) addItemType(type, `TYPES.Item.${type}`);
+  for (const [type, label] of Object.entries(CONFIG.Item?.typeLabels ?? {})) addItemType(type, label);
 
   for (const type of ["weapon", "consumable", "equipment", "tool", "loot", "container", "backpack", "spell", "feat"]) {
-    addOption(itemTypes, type, `TYPES.Item.${type}`);
+    addItemType(type, `TYPES.Item.${type}`);
   }
 
   const options = Array.from(itemTypes, ([value, label]) => ({ value, label }))
@@ -1486,6 +1491,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
   }
 
   async close(options = {}) {
+    this._closeAllSelects();
     const force = typeof options === "boolean" ? options : options?.force;
     if (this._dirty && !force && !this._closingAfterSave) {
       const confirmed = await foundry.applications.api.DialogV2.confirm({
@@ -1597,16 +1603,29 @@ class ContainerRulesApp extends ContainerRulesApplication {
       return;
     }
     if (!target.matches('.cr-option-row input[type="checkbox"]')) return;
-    const root = target.closest(".cr-multiselect");
+    this._applyOptionInput(target);
+  }
+
+  _applyOptionInput(input) {
+    const root = input.closest(".cr-multiselect");
     const name = root?.dataset.select;
     if (!name) return;
-    const token = normalizeToken(target.value);
+    const token = normalizeToken(input.value);
     const values = new Set(this.draft[name]);
-    target.checked ? values.add(token) : values.delete(token);
+    input.checked ? values.add(token) : values.delete(token);
     this._setSelection(name, Array.from(values));
   }
 
   _onLocalClick(event) {
+    const row = event.target.closest?.(".cr-option-row");
+    if (row && !event.target.matches?.('input[type="checkbox"]')) {
+      const input = row.querySelector('input[type="checkbox"]');
+      if (!input || input.disabled) return;
+      event.preventDefault();
+      input.checked = !input.checked;
+      this._applyOptionInput(input);
+      return;
+    }
     const combo = event.target.closest(".cr-combobox");
     if (!combo || event.target.closest("button")) return;
     const root = combo.closest(".cr-multiselect");
