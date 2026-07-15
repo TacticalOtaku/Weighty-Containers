@@ -664,8 +664,9 @@ body.theme-dark .container-rules {
   border-radius: var(--cr-radius-md);
   box-shadow: var(--cr-shadow-raised);
   color: var(--cr-text);
-  display: grid;
-  grid-template-rows: auto minmax(80px, 1fr) auto;
+  display: flex;
+  flex-direction: column;
+  height: fit-content;
   overflow: hidden;
   margin: 0;
   position: fixed;
@@ -685,6 +686,7 @@ body.theme-dark .container-rules {
   background: var(--cr-surface-raised);
   border-bottom: 1px solid var(--cr-border);
   display: grid;
+  flex: 0 0 auto;
   gap: 7px;
   padding: 10px;
 }
@@ -752,7 +754,9 @@ body.theme-dark .container-rules {
 }
 
 .container-rules .cr-options {
+  flex: 0 1 auto;
   max-block-size: min(24rem, calc(100dvh - 12rem));
+  min-block-size: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -820,6 +824,10 @@ body.theme-dark .container-rules {
   width: 1px;
 }
 
+.container-rules .cr-option-row input {
+  pointer-events: none;
+}
+
 .container-rules .cr-checkbox-mark {
   align-items: center;
   background: color-mix(in srgb, var(--cr-bg) 72%, var(--cr-surface-raised));
@@ -858,6 +866,7 @@ body.theme-dark .container-rules {
 
 .container-rules .cr-select-result {
   border-top: 1px solid var(--cr-border);
+  flex: 0 0 auto;
   min-height: 30px;
   padding: 7px 12px;
 }
