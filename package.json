@@ -1,6 +1,6 @@
 {
   "name": "weighty-containers",
-  "version": "3.3.0",
+  "version": "3.3.4",
   "private": true,
   "type": "module",
   "scripts": {
