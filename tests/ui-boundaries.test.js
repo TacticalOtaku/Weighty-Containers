@@ -35,19 +35,17 @@ test("container rules window starts centered at its intended size", async () => 
   });
 });
 
-test("container rules application passes centered position to ApplicationV2", async () => {
-  let applicationOptions;
-  let renderOptions;
+test("public dialog opener returns a rendered and centered ApplicationV2", async () => {
   class ApplicationV2 {
     constructor(options) {
-      applicationOptions = options;
+      this.id = options.id;
+      this.position = options.position;
       this.rendered = false;
     }
 
     addEventListener() {}
 
     async render(options) {
-      renderOptions = options;
       this.rendered = true;
       return this;
     }
@@ -78,7 +76,7 @@ test("container rules application passes centered position to ApplicationV2", as
   const { openReductionDialog } = await import(
     "../scripts/ui/container-rules-app.js?position-regression"
   );
-  await openReductionDialog({
+  const app = await openReductionDialog({
     id: "container",
     uuid: "Actor.actor.Item.container",
     name: "Container",
@@ -86,11 +84,9 @@ test("container rules application passes centered position to ApplicationV2", as
     parent: { id: "actor" }
   });
 
-  assert.deepEqual(applicationOptions.position, {
-    width: 880,
-    height: 720,
-    left: 445,
-    top: 305
-  });
-  assert.deepEqual(renderOptions, { force: true });
+  assert.equal(app.rendered, true);
+  assert.equal(app.position.width, 880);
+  assert.equal(app.position.height, 720);
+  assert.equal(app.position.left, Math.round((window.innerWidth - app.position.width) / 2));
+  assert.equal(app.position.top, Math.round((window.innerHeight - app.position.height) / 2));
 });

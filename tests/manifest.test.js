@@ -12,9 +12,9 @@ test("package metadata uses one module version", async () => {
     readJson("package.json")
   ]);
 
-  assert.equal(manifest.version, "3.3.4");
+  assert.equal(manifest.version, "3.3.5");
   assert.equal(pkg.version, manifest.version);
-  assert.match(manifest.download, /\/v3\.3\.4\/weighty-containers-v3\.3\.4\.zip$/);
+  assert.match(manifest.download, /\/v3\.3\.5\/weighty-containers-v3\.3\.5\.zip$/);
 });
 
 test("manifest is verified for Foundry 14.367", async () => {
