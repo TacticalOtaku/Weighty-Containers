@@ -7,20 +7,11 @@ import {
 } from "../core/containers.js";
 import { validateContainerRestrictions } from "../core/restrictions.js";
 import { isContainer } from "../core/weight.js";
-
-const LBS_PER_KG = 2.20462;
-
-function getSystemWeightUnit() {
-  try {
-    return game.settings.get("dnd5e", "metricWeightUnits") ? "kg" : "lb";
-  } catch {
-    return "lb";
-  }
-}
-
-function lbsToDisplay(value) {
-  return getSystemWeightUnit() === "kg" ? value / LBS_PER_KG : value;
-}
+import {
+  getSystemWeightUnit,
+  getWeaponTypeMap,
+  lbsToDisplay
+} from "../integrations/dnd5e.js";
 
 function makeItemCandidate(item, changes = {}) {
   const source = item?.toObject?.() ?? {
@@ -113,7 +104,7 @@ export function registerEnforcementHooks({ logger, socket }) {
 
   const enforceRestrictions = (actor, container, itemData) => {
     const result = validateContainerRestrictions(container, itemData, {
-      weaponTypeMap: CONFIG.DND5E?.weaponTypeMap ?? {}
+      weaponTypeMap: getWeaponTypeMap()
     });
     if (result.ok) return true;
     notifyRestriction({

@@ -5,6 +5,13 @@ import {
   parseTokenList
 } from "../core/restrictions.js";
 import { clamp, getReductionPct, num } from "../core/weight.js";
+import {
+  getItemDocumentTypes,
+  getItemTypeLabels,
+  getPropertyCatalogs,
+  getSubtypeCatalogs,
+  getValidPropertiesByItemType
+} from "../integrations/dnd5e.js";
 
 export function escapeHtml(value) {
   const text = String(value ?? "");
@@ -18,8 +25,8 @@ export function escapeHtml(value) {
   }[c]));
 }
 
-// Catalog adapters are intentionally kept at the UI boundary because they
-// translate D&D5e configuration objects into presentation options.
+// Presentation stays at the UI boundary; D&D5e configuration discovery is
+// owned by the integration adapter.
 function localizeConfigLabel(label, fallback = null) {
   if (!label) return fallback ?? "";
   return game.i18n.localize(String(label));
@@ -77,8 +84,8 @@ function valuesFromConfig(config) {
 export function getRuleItemTypeGroups() {
   const itemTypes = new Map();
 
-  for (const type of valuesFromConfig(game.system?.documentTypes?.Item)) addOption(itemTypes, type, `TYPES.Item.${type}`);
-  for (const [type, label] of Object.entries(CONFIG.Item?.typeLabels ?? {})) addOption(itemTypes, type, label);
+  for (const type of valuesFromConfig(getItemDocumentTypes())) addOption(itemTypes, type, `TYPES.Item.${type}`);
+  for (const [type, label] of Object.entries(getItemTypeLabels())) addOption(itemTypes, type, label);
 
   for (const type of ["weapon", "consumable", "equipment", "tool", "loot", "container", "backpack", "spell", "feat"]) {
     addOption(itemTypes, type, `TYPES.Item.${type}`);
@@ -91,10 +98,9 @@ export function getRuleItemTypeGroups() {
 }
 
 export function getRuleSubtypeGroups() {
-  const dnd5e = CONFIG.DND5E ?? {};
   const groups = [];
-  const addGroup = (key, labelKey, types = []) => {
-    const options = optionsFromConfig(dnd5e[key]);
+  const addGroup = ({ key, labelKey, types = [], values }) => {
+    const options = optionsFromConfig(values);
     if (options.length) groups.push({
       key,
       label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.${labelKey}`),
@@ -113,12 +119,7 @@ export function getRuleSubtypeGroups() {
     ]
   });
 
-  addGroup("weaponTypes", "weaponTypes", ["weapon"]);
-  addGroup("consumableTypes", "consumableTypes", ["consumable"]);
-  addGroup("equipmentTypes", "equipmentTypes", ["equipment"]);
-  addGroup("armorTypes", "armorTypes", ["equipment"]);
-  addGroup("toolTypes", "toolTypes", ["tool"]);
-  addGroup("lootTypes", "lootTypes", ["loot"]);
+  for (const catalog of getSubtypeCatalogs()) addGroup(catalog);
 
   if (!groups.some(g => g.options.length)) {
     groups.push({
@@ -141,11 +142,10 @@ export function getRuleSubtypeGroups() {
 }
 
 export function getRulePropertyGroups() {
-  const dnd5e = CONFIG.DND5E ?? {};
   const groups = [];
   const seen = new Set();
-  const addGroup = (key, labelKey) => {
-    const options = optionsFromConfig(dnd5e[key]).filter(option => {
+  const addGroup = ({ key, labelKey, values }) => {
+    const options = optionsFromConfig(values).filter(option => {
       if (seen.has(option.value)) return false;
       seen.add(option.value);
       return true;
@@ -157,14 +157,9 @@ export function getRulePropertyGroups() {
     });
   };
 
-  addGroup("itemProperties", "itemProperties");
-  addGroup("weaponProperties", "weaponProperties");
-  addGroup("equipmentProperties", "equipmentProperties");
-  addGroup("consumableProperties", "consumableProperties");
+  for (const catalog of getPropertyCatalogs()) addGroup(catalog);
 
-  const validProperties = dnd5e.validProperties;
-  if (validProperties && typeof validProperties === "object") {
-    for (const [itemType, properties] of Object.entries(validProperties)) {
+  for (const [itemType, properties] of Object.entries(getValidPropertiesByItemType())) {
       const options = optionsFromConfig(properties).filter(option => {
         if (seen.has(option.value)) return false;
         seen.add(option.value);
@@ -175,7 +170,6 @@ export function getRulePropertyGroups() {
         label: localizeConfigLabel(`TYPES.Item.${itemType}`, itemType),
         options
       });
-    }
   }
 
   if (!groups.length) {

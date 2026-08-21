@@ -1,21 +1,14 @@
 import { MODULE_ID, PREVIEW_BASE_WEIGHT } from "../constants.js";
-import {
-  getContainerRestrictions,
-  normalizeToken,
-  parseTokenList
-} from "../core/restrictions.js";
-import { clamp, getReductionPct, num } from "../core/weight.js";
+import { clamp, num } from "../core/weight.js";
 import { LOG } from "../foundry/logger.js";
 import {
   containerConfigMatches,
   escapeHtml,
-  getRuleItemTypeGroups,
-  getRulePropertyGroups,
-  getRuleSubtypeGroups,
   makeContainerConfigUpdate,
-  prepareRuleGroups,
   renderRuleMultiselect
 } from "./rule-presentation.js";
+import { ContainerRulesState } from "./container-rules-state.js";
+import { ContainerRulesMultiselectController } from "./container-rules-multiselect.js";
 import {
   CONTAINER_RULES_WINDOW_SIZE,
   getCenteredWindowPosition
@@ -71,22 +64,17 @@ class ContainerRulesApp extends ContainerRulesApplication {
       window: { ...options.window, title }
     });
     this.containerItem = containerItem;
-    const restrictions = getContainerRestrictions(containerItem);
-    this.draft = {
-      reductionPct: getReductionPct(containerItem),
-      allowedTypes: [...restrictions.allowedTypes],
-      allowedSubtypes: [...restrictions.allowedSubtypes],
-      requiredProperties: [...restrictions.requiredProperties],
-      forbiddenProperties: [...restrictions.forbiddenProperties],
-      propertyMatchMode: restrictions.propertyMatchMode
-    };
-    this.catalogs = {
-      allowedTypes: getRuleItemTypeGroups(),
-      allowedSubtypes: getRuleSubtypeGroups(),
-      requiredProperties: getRulePropertyGroups(),
-      forbiddenProperties: getRulePropertyGroups()
-    };
-    this._initialSnapshot = this._snapshot();
+    this.rules = ContainerRulesState.fromItem(containerItem);
+    this.multiselect = new ContainerRulesMultiselectController({
+      rules: this.rules,
+      getElement: () => this.element,
+      animate: (...args) => this._animate(...args),
+      onSelectionChange: () => {
+        this._refreshPropertyConflicts();
+        this._afterDraftChange();
+      }
+    });
+    this._initialSnapshot = this.rules.snapshot();
     this._dirty = false;
     this._hasErrors = false;
     this._closingAfterSave = false;
@@ -96,39 +84,39 @@ class ContainerRulesApp extends ContainerRulesApplication {
 
   async _prepareContext(options) {
     const context = await super._prepareContext(options);
-    const propertyGroups = this.catalogs.requiredProperties;
+    const propertyGroups = this.rules.catalogs.requiredProperties;
     return {
       ...context,
       containerName: this.containerItem.name,
-      reductionPct: this.draft.reductionPct,
+      reductionPct: this.rules.reductionPct,
       previewBefore: PREVIEW_BASE_WEIGHT,
-      previewAfter: Math.max(0, PREVIEW_BASE_WEIGHT * (1 - this.draft.reductionPct / 100)).toLocaleString(game.i18n.lang, {
+      previewAfter: this.rules.previewAfter(PREVIEW_BASE_WEIGHT).toLocaleString(game.i18n.lang, {
         maximumFractionDigits: 1
       }),
-      modeAll: this.draft.propertyMatchMode === "all",
-      modeAny: this.draft.propertyMatchMode === "any",
+      modeAll: this.rules.propertyMatchMode === "all",
+      modeAny: this.rules.propertyMatchMode === "any",
       allowedTypesSelect: renderRuleMultiselect({
         name: "allowedTypes",
-        groups: this.catalogs.allowedTypes,
-        selectedValues: this.draft.allowedTypes,
+        groups: this.rules.catalogs.allowedTypes,
+        selectedValues: this.rules.allowedTypes,
         placeholder: game.i18n.localize(`${MODULE_ID}.configDialog.anyTypes`)
       }),
       allowedSubtypesSelect: renderRuleMultiselect({
         name: "allowedSubtypes",
-        groups: this.catalogs.allowedSubtypes,
-        selectedValues: this.draft.allowedSubtypes,
+        groups: this.rules.catalogs.allowedSubtypes,
+        selectedValues: this.rules.allowedSubtypes,
         placeholder: game.i18n.localize(`${MODULE_ID}.configDialog.anySubtypes`)
       }),
       requiredPropertiesSelect: renderRuleMultiselect({
         name: "requiredProperties",
         groups: propertyGroups,
-        selectedValues: this.draft.requiredProperties,
+        selectedValues: this.rules.requiredProperties,
         placeholder: game.i18n.localize(`${MODULE_ID}.configDialog.anyProperties`)
       }),
       forbiddenPropertiesSelect: renderRuleMultiselect({
         name: "forbiddenProperties",
-        groups: this.catalogs.forbiddenProperties,
-        selectedValues: this.draft.forbiddenProperties,
+        groups: this.rules.catalogs.forbiddenProperties,
+        selectedValues: this.rules.forbiddenProperties,
         placeholder: game.i18n.localize(`${MODULE_ID}.configDialog.anyProperties`)
       })
     };
@@ -148,13 +136,13 @@ class ContainerRulesApp extends ContainerRulesApplication {
     this.element.addEventListener("input", event => this._onInput(event), { signal });
     this.element.addEventListener("keydown", event => this._onKeyDown(event), { signal });
     this.element.querySelector(".cr-main")?.addEventListener("scroll", () => {
-      this._closeAllSelects();
+      this.multiselect.closeAll();
       this._updateActiveSection();
     }, { signal, passive: true });
     document.addEventListener("pointerdown", event => {
-      if (!this.element?.contains(event.target)) this._closeAllSelects();
+      if (!this.element?.contains(event.target)) this.multiselect.closeAll();
     }, { signal });
-    window.addEventListener("resize", () => this._closeAllSelects(), { signal, passive: true });
+    window.addEventListener("resize", () => this.multiselect.closeAll(), { signal, passive: true });
 
     this._installDirtyIndicator();
     this._refreshAll();
@@ -167,7 +155,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
 
   _onPosition(position) {
     super._onPosition(position);
-    this._closeAllSelects();
+    this.multiselect.closeAll();
   }
 
   async close(options = {}) {
@@ -195,32 +183,28 @@ class ContainerRulesApp extends ContainerRulesApplication {
   }
 
   static _clearSelect(event, target) {
-    this._setSelection(target.dataset.selectName, []);
+    this.multiselect.setSelection(target.dataset.selectName, []);
   }
 
   static _selectVisible(event, target) {
-    this._bulkVisible(target.dataset.selectName, true);
+    this.multiselect.bulkVisible(target.dataset.selectName, true);
   }
 
   static _deselectVisible(event, target) {
-    this._bulkVisible(target.dataset.selectName, false);
+    this.multiselect.bulkVisible(target.dataset.selectName, false);
   }
 
   static _removeSelection(event, target) {
     const name = target.dataset.selectName;
-    this._setSelection(name, this.draft[name].filter(value => value !== normalizeToken(target.dataset.token)));
+    this.multiselect.removeSelection(name, target.dataset.token);
   }
 
   static _removeUnavailable() {
-    const unavailable = new Set(this._getUnavailableSubtypeValues());
-    this._setSelection("allowedSubtypes", this.draft.allowedSubtypes.filter(value => !unavailable.has(value)));
+    this.multiselect.removeUnavailableSubtypes();
   }
 
   static _resolveConflict(event, target) {
-    const keep = target.dataset.keep;
-    const removeFrom = keep === "requiredProperties" ? "forbiddenProperties" : "requiredProperties";
-    const conflicts = new Set(this._propertyConflicts());
-    this._setSelection(removeFrom, this.draft[removeFrom].filter(value => !conflicts.has(value)));
+    this.multiselect.resolvePropertyConflicts(target.dataset.keep);
   }
 
   static _scrollSection(event, target) {
@@ -228,10 +212,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
   }
 
   static _showUnavailable() {
-    const root = this._selectRoot("allowedSubtypes");
-    root?.classList.toggle("show-unavailable");
-    this._applySelectFilter(root);
-    if (root && !root.classList.contains("is-open")) this._openSelect(root);
+    this.multiselect.showUnavailable();
   }
 
   static _toggleSection(event, target) {
@@ -240,20 +221,18 @@ class ContainerRulesApp extends ContainerRulesApplication {
   }
 
   static _toggleSelect(event, target) {
-    const root = this._selectRoot(target.dataset.selectName);
-    if (!root) return;
-    root.classList.contains("is-open") ? this._closeSelect(root) : this._openSelect(root);
+    this.multiselect.toggle(target.dataset.selectName);
   }
 
   _onInput(event) {
     const target = event.target;
     if (target.matches("[data-select-search]")) {
-      this._applySelectFilter(target.closest(".cr-multiselect"));
+      this.multiselect.applyFilter(target.closest(".cr-multiselect"));
       return;
     }
     if (!target.matches('[name="reductionPct"], [name="reductionRange"]')) return;
     const value = clamp(Math.round(num(target.value, 0)), 0, 100);
-    this.draft.reductionPct = value;
+    this.rules.setReductionPct(value);
     for (const input of this.element.querySelectorAll('[name="reductionPct"], [name="reductionRange"]')) {
       if (input !== target) input.value = value;
     }
@@ -264,38 +243,15 @@ class ContainerRulesApp extends ContainerRulesApplication {
   _onChange(event) {
     const target = event.target;
     if (target.matches('[name="propertyMatchMode"]')) {
-      this.draft.propertyMatchMode = target.value === "any" ? "any" : "all";
+      this.rules.setPropertyMatchMode(target.value);
       this._afterDraftChange();
       return;
     }
-    if (target.matches("[data-group-toggle]")) {
-      const root = target.closest(".cr-multiselect");
-      const group = target.closest(".cr-option-group");
-      const name = root?.dataset.select;
-      if (!name || !group) return;
-      const values = new Set(this.draft[name]);
-      for (const input of group.querySelectorAll('.cr-option-row input[type="checkbox"]')) {
-        const token = normalizeToken(input.value);
-        target.checked ? values.add(token) : values.delete(token);
-      }
-      this._setSelection(name, Array.from(values));
-      return;
-    }
-    if (!target.matches('.cr-option-row input[type="checkbox"]')) return;
-    const root = target.closest(".cr-multiselect");
-    const name = root?.dataset.select;
-    if (!name) return;
-    const token = normalizeToken(target.value);
-    const values = new Set(this.draft[name]);
-    target.checked ? values.add(token) : values.delete(token);
-    this._setSelection(name, Array.from(values));
+    this.multiselect.handleChange(target);
   }
 
   _onLocalClick(event) {
-    const combo = event.target.closest(".cr-combobox");
-    if (!combo || event.target.closest("button")) return;
-    const root = combo.closest(".cr-multiselect");
-    root.classList.contains("is-open") ? this._closeSelect(root) : this._openSelect(root);
+    this.multiselect.handleLocalClick(event);
   }
 
   _onKeyDown(event) {
@@ -314,93 +270,11 @@ class ContainerRulesApp extends ContainerRulesApplication {
       return;
     }
 
-    if (event.key === "Escape") {
-      const open = this.element.querySelector(".cr-multiselect.is-open");
-      if (open) {
-        event.preventDefault();
-        event.stopPropagation();
-        this._closeSelect(open);
-      }
-      return;
-    }
-
-    const combo = event.target.closest?.(".cr-combobox");
-    if (combo && ["Enter", " ", "ArrowDown"].includes(event.key)) {
-      event.preventDefault();
-      const root = combo.closest(".cr-multiselect");
-      if (!root.classList.contains("is-open")) this._openSelect(root);
-      if (event.key === "ArrowDown") this._focusSelectRow(root, 0);
-      return;
-    }
-
-    const rowInput = event.target.matches?.('.cr-option-row input[type="checkbox"]') ? event.target : null;
-    if (!rowInput || !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-    event.preventDefault();
-    const root = rowInput.closest(".cr-multiselect");
-    const visible = this._visibleRowInputs(root);
-    const current = visible.indexOf(rowInput);
-    const index = event.key === "Home" ? 0
-      : event.key === "End" ? visible.length - 1
-        : clamp(current + (event.key === "ArrowDown" ? 1 : -1), 0, visible.length - 1);
-    visible[index]?.focus();
-  }
-
-  _selectRoot(name) {
-    return this.element?.querySelector?.(`.cr-multiselect[data-select="${name}"]`) ?? null;
-  }
-
-  _snapshot() {
-    return JSON.stringify({
-      reductionPct: this.draft.reductionPct,
-      allowedTypes: [...this.draft.allowedTypes].sort(),
-      allowedSubtypes: [...this.draft.allowedSubtypes].sort(),
-      requiredProperties: [...this.draft.requiredProperties].sort(),
-      forbiddenProperties: [...this.draft.forbiddenProperties].sort(),
-      propertyMatchMode: this.draft.propertyMatchMode
-    });
-  }
-
-  _setSelection(name, values) {
-    if (!Object.hasOwn(this.draft, name)) return;
-    this.draft[name] = Array.from(new Set(parseTokenList(values)));
-    const root = this._selectRoot(name);
-    const selected = new Set(this.draft[name]);
-    for (const input of root?.querySelectorAll?.('.cr-option-row input[type="checkbox"]') ?? []) {
-      input.checked = selected.has(normalizeToken(input.value));
-    }
-    this._refreshMultiselect(root);
-    if (name === "allowedTypes") {
-      this._applySelectFilter(this._selectRoot("allowedSubtypes"));
-      this._refreshSubtypeWarning();
-    }
-    if (name === "allowedSubtypes") this._refreshSubtypeWarning();
-    this._refreshPropertyConflicts();
-    this._afterDraftChange();
-  }
-
-  _bulkVisible(name, checked) {
-    const root = this._selectRoot(name);
-    if (!root) return;
-    const values = new Set(this.draft[name]);
-    for (const input of this._visibleRowInputs(root)) {
-      const token = normalizeToken(input.value);
-      checked ? values.add(token) : values.delete(token);
-    }
-    this._setSelection(name, Array.from(values));
-  }
-
-  _visibleRowInputs(root) {
-    if (!root) return [];
-    return Array.from(root.querySelectorAll('.cr-option-row input[type="checkbox"]'))
-      .filter(input => !input.closest(".cr-option-row").hidden && !input.closest(".cr-option-group").hidden);
+    this.multiselect.handleKeyDown(event);
   }
 
   _refreshAll() {
-    for (const name of ["allowedTypes", "allowedSubtypes", "requiredProperties", "forbiddenProperties"]) {
-      this._refreshMultiselect(this._selectRoot(name));
-    }
-    this._applySelectFilter(this._selectRoot("allowedSubtypes"));
-    this._refreshSubtypeWarning();
+    this.multiselect.refreshAll();
     this._refreshPropertyConflicts();
     this._refreshPreview();
     this._refreshSummary();
@@ -421,133 +295,14 @@ class ContainerRulesApp extends ContainerRulesApplication {
     });
   }
 
-  _refreshMultiselect(root) {
-    if (!root) return;
-    const name = root.dataset.select;
-    const selected = new Set(this.draft[name]);
-    const labels = this._selectionLabels(name);
-    const selection = root.querySelector("[data-selection]");
-    const visibleLabels = labels.slice(0, 3);
-    const chips = visibleLabels.map(({ value, label }) => `
-      <button type="button" class="cr-chip" data-action="removeSelection"
-              data-select-name="${escapeHtml(name)}" data-token="${escapeHtml(value)}"
-              title="${escapeHtml(game.i18n.localize(`${MODULE_ID}.configDialog.actions.remove`))}">
-        <span>${escapeHtml(label)}</span><i class="fas fa-xmark" aria-hidden="true"></i>
-      </button>`).join("");
-    const more = labels.length > 3 ? `<span class="cr-chip cr-chip-more">+${labels.length - 3}</span>` : "";
-    const placeholder = `<span class="cr-placeholder">${escapeHtml(root.dataset.placeholder)}</span>`;
-    const mobile = `<span class="cr-mobile-selection">${escapeHtml(game.i18n.format(`${MODULE_ID}.configDialog.selectedCount`, { count: labels.length }))}</span>`;
-    const previousCount = Number(root.dataset.selectionCount ?? -1);
-    selection.innerHTML = labels.length ? `${chips}${more}${mobile}` : placeholder;
-    selection.title = labels.map(entry => entry.label).join(", ");
-    root.dataset.selectionCount = String(labels.length);
-    if (previousCount >= 0 && previousCount !== labels.length) {
-      for (const [index, chip] of Array.from(selection.querySelectorAll(".cr-chip")).entries()) {
-        this._animate(chip, [
-          { opacity: .35, transform: "translateY(3px) scale(.96)" },
-          { opacity: 1, transform: "translateY(0) scale(1)" }
-        ], { delay: Math.min(index, 3) * 24 });
-      }
-    }
-
-    const clear = root.querySelector(".cr-select-clear");
-    if (clear) clear.hidden = selected.size === 0;
-    const uniqueOptions = new Set(Array.from(root.querySelectorAll('.cr-option-row input[type="checkbox"]'))
-      .map(input => normalizeToken(input.value)));
-    const total = root.querySelector("[data-select-total]");
-    if (total) total.textContent = game.i18n.format(`${MODULE_ID}.configDialog.selectedOf`, {
-      selected: selected.size,
-      total: uniqueOptions.size
-    });
-    const result = root.querySelector("[data-select-result]");
-    if (result) result.textContent = game.i18n.format(`${MODULE_ID}.configDialog.selectedCount`, { count: selected.size });
-
-    for (const row of root.querySelectorAll(".cr-option-row")) {
-      const input = row.querySelector('input[type="checkbox"]');
-      row.classList.toggle("is-selected", input.checked);
-      row.setAttribute("aria-selected", String(input.checked));
-    }
-    for (const group of root.querySelectorAll(".cr-option-group")) this._refreshGroupState(group);
-  }
-
-  _refreshGroupState(group) {
-    const inputs = Array.from(group.querySelectorAll('.cr-option-row input[type="checkbox"]'));
-    const checked = inputs.filter(input => input.checked).length;
-    const toggle = group.querySelector("[data-group-toggle]");
-    if (toggle) {
-      toggle.checked = inputs.length > 0 && checked === inputs.length;
-      toggle.indeterminate = checked > 0 && checked < inputs.length;
-    }
-    const count = group.querySelector(".cr-group-count");
-    if (count) count.textContent = `${checked} / ${inputs.length}`;
-  }
-
-  _selectionLabels(name) {
-    const labelMap = new Map();
-    for (const group of prepareRuleGroups(this.catalogs[name], this.draft[name])) {
-      for (const option of group.options) labelMap.set(normalizeToken(option.value), option.label);
-    }
-    return this.draft[name].map(value => ({ value, label: labelMap.get(value) ?? value }));
-  }
-
-  _applySelectFilter(root) {
-    if (!root) return;
-    const query = normalizeToken(root.querySelector("[data-select-search]")?.value);
-    const allowedTypes = new Set(this.draft.allowedTypes);
-    const showUnavailable = root.classList.contains("show-unavailable");
-    for (const group of root.querySelectorAll(".cr-option-group")) {
-      const groupTypes = parseTokenList(group.dataset.types?.replaceAll(" ", ","));
-      const typeAvailable = root.dataset.select !== "allowedSubtypes"
-        || !allowedTypes.size
-        || (!group.hasAttribute("data-saved") && (!groupTypes.length || groupTypes.some(type => allowedTypes.has(type))));
-      const allowHiddenSelection = showUnavailable && Array.from(group.querySelectorAll('.cr-option-row input[type="checkbox"]'))
-        .some(input => input.checked);
-      let visibleCount = 0;
-      for (const row of group.querySelectorAll(".cr-option-row")) {
-        const matchesSearch = !query || row.dataset.search.includes(query);
-        row.hidden = !(matchesSearch && (typeAvailable || (allowHiddenSelection && row.querySelector("input").checked)));
-        if (!row.hidden) visibleCount += 1;
-      }
-      group.hidden = visibleCount === 0;
-      group.classList.toggle("is-unavailable", !typeAvailable);
-      this._refreshGroupState(group);
-    }
-  }
-
-  _getUnavailableSubtypeValues() {
-    if (!this.draft.allowedTypes.length) return [];
-    const selectedTypes = new Set(this.draft.allowedTypes);
-    const available = new Set();
-    for (const group of this.catalogs.allowedSubtypes) {
-      const types = new Set((group.types ?? []).map(normalizeToken));
-      if (types.size && !Array.from(types).some(type => selectedTypes.has(type))) continue;
-      for (const option of group.options) available.add(normalizeToken(option.value));
-    }
-    return this.draft.allowedSubtypes.filter(value => !available.has(value));
-  }
-
-  _refreshSubtypeWarning() {
-    const values = this._getUnavailableSubtypeValues();
-    const warning = this.element.querySelector("[data-subtype-warning]");
-    if (!warning) return;
-    warning.hidden = values.length === 0;
-    const text = warning.querySelector("[data-warning-text]");
-    if (text) text.textContent = game.i18n.format(`${MODULE_ID}.configDialog.unavailableSubtypes`, { count: values.length });
-  }
-
-  _propertyConflicts() {
-    const forbidden = new Set(this.draft.forbiddenProperties);
-    return this.draft.requiredProperties.filter(value => forbidden.has(value));
-  }
-
   _refreshPropertyConflicts() {
-    const conflicts = this._propertyConflicts();
+    const conflicts = this.rules.propertyConflicts();
     this._hasErrors = conflicts.length > 0;
-    const labels = this._selectionLabels("requiredProperties")
+    const labels = this.rules.selectionLabels("requiredProperties")
       .filter(entry => conflicts.includes(entry.value))
       .map(entry => entry.label);
     for (const name of ["requiredProperties", "forbiddenProperties"]) {
-      const root = this._selectRoot(name);
+      const root = this.multiselect.root(name);
       root?.classList.toggle("is-invalid", this._hasErrors);
       root?.querySelector(".cr-combobox")?.setAttribute("aria-invalid", String(this._hasErrors));
       const error = this.element.querySelector(`[data-property-error="${name}"]`);
@@ -571,13 +326,13 @@ class ContainerRulesApp extends ContainerRulesApplication {
   }
 
   _refreshPreview() {
-    const after = Math.max(0, PREVIEW_BASE_WEIGHT * (1 - this.draft.reductionPct / 100));
+    const after = this.rules.previewAfter(PREVIEW_BASE_WEIGHT);
     const value = this.element.querySelector("[data-preview-after]");
     const formatted = after.toLocaleString(game.i18n.lang, { maximumFractionDigits: 1 });
     const changed = value?.textContent !== formatted;
     if (value) value.textContent = formatted;
     const range = this.element.querySelector('[name="reductionRange"]');
-    range?.style.setProperty("--cr-range-progress", `${this.draft.reductionPct}%`);
+    range?.style.setProperty("--cr-range-progress", `${this.rules.reductionPct}%`);
     if (changed) {
       this._animate(value, [
         { opacity: .45, transform: "translateY(3px) scale(.94)" },
@@ -589,27 +344,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
   _refreshSummary() {
     const summary = this.element.querySelector("[data-rule-summary]");
     if (!summary) return;
-    const typeLabels = this._selectionLabels("allowedTypes").map(entry => entry.label);
-    const subtypeLabels = this._selectionLabels("allowedSubtypes").map(entry => entry.label);
-    const requiredLabels = this._selectionLabels("requiredProperties").map(entry => entry.label);
-    const forbiddenLabels = this._selectionLabels("forbiddenProperties").map(entry => entry.label);
-    const lines = [game.i18n.format(`${MODULE_ID}.configDialog.summary.reduction`, { pct: this.draft.reductionPct })];
-    lines.push(typeLabels.length
-      ? game.i18n.format(`${MODULE_ID}.configDialog.summary.types`, { values: typeLabels.join(", ") })
-      : game.i18n.localize(`${MODULE_ID}.configDialog.summary.anyTypes`));
-    if (subtypeLabels.length) lines.push(game.i18n.format(`${MODULE_ID}.configDialog.summary.subtypes`, {
-      values: subtypeLabels.join(", ")
-    }));
-    if (requiredLabels.length) lines.push(game.i18n.format(
-      `${MODULE_ID}.configDialog.summary.${this.draft.propertyMatchMode === "any" ? "requiredAny" : "requiredAll"}`,
-      { values: requiredLabels.join(", ") }
-    ));
-    if (forbiddenLabels.length) lines.push(game.i18n.format(`${MODULE_ID}.configDialog.summary.forbidden`, {
-      values: forbiddenLabels.join(", ")
-    }));
-    if (!requiredLabels.length && !forbiddenLabels.length) {
-      lines.push(game.i18n.localize(`${MODULE_ID}.configDialog.summary.noProperties`));
-    }
+    const lines = this.rules.summaryLines();
     summary.replaceChildren(...lines.map(line => {
       const paragraph = document.createElement("p");
       paragraph.textContent = line;
@@ -622,8 +357,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
   }
 
   _refreshBadges() {
-    const restrictionsCount = this.draft.allowedTypes.length + this.draft.allowedSubtypes.length;
-    const propertyCount = this.draft.requiredProperties.length + this.draft.forbiddenProperties.length;
+    const { restrictions: restrictionsCount, properties: propertyCount } = this.rules.counts();
     const restrictions = this.element.querySelector('[data-nav-badge="restrictions"]');
     const properties = this.element.querySelector('[data-nav-badge="properties"]');
     if (restrictions) {
@@ -656,7 +390,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
 
   _refreshDirtyState() {
     const wasDirty = this._dirty;
-    this._dirty = this._snapshot() !== this._initialSnapshot;
+    this._dirty = this.rules.snapshot() !== this._initialSnapshot;
     const indicator = this.window?.header?.querySelector(".cr-dirty-state");
     if (indicator) {
       indicator.hidden = !this._dirty;
@@ -667,65 +401,6 @@ class ContainerRulesApp extends ContainerRulesApplication {
         ], { duration: 220 });
       }
     }
-  }
-
-  _openSelect(root) {
-    this._closeAllSelects(root);
-    root.classList.add("is-open");
-    const panel = root.querySelector(".cr-select-panel");
-    panel.hidden = false;
-    try {
-      panel.showPopover?.();
-    } catch {
-      panel.removeAttribute("popover");
-    }
-    root.querySelector(".cr-combobox")?.setAttribute("aria-expanded", "true");
-    this._applySelectFilter(root);
-    this._positionSelectPanel(root);
-    requestAnimationFrame(() => root.querySelector("[data-select-search]")?.focus());
-  }
-
-  _closeSelect(root) {
-    if (!root) return;
-    root.classList.remove("is-open");
-    const panel = root.querySelector(".cr-select-panel");
-    if (panel) {
-      try {
-        if (panel.matches(":popover-open")) panel.hidePopover();
-      } catch {}
-      panel.hidden = true;
-      panel.removeAttribute("style");
-    }
-    root.querySelector(".cr-combobox")?.setAttribute("aria-expanded", "false");
-  }
-
-  _closeAllSelects(except = null) {
-    for (const root of this.element?.querySelectorAll?.(".cr-multiselect.is-open") ?? []) {
-      if (root !== except) this._closeSelect(root);
-    }
-  }
-
-  _positionSelectPanel(root) {
-    const combo = root.querySelector(".cr-combobox");
-    const panel = root.querySelector(".cr-select-panel");
-    if (!combo || !panel) return;
-    const rect = combo.getBoundingClientRect();
-    const below = window.innerHeight - rect.bottom - 12;
-    const above = rect.top - 12;
-    const openUp = below < 280 && above > below;
-    const available = Math.max(180, Math.min(380, openUp ? above : below));
-    Object.assign(panel.style, {
-      left: `${rect.left}px`,
-      width: `${rect.width}px`,
-      maxHeight: `${available}px`,
-      top: openUp ? "auto" : `${rect.bottom + 4}px`,
-      bottom: openUp ? `${window.innerHeight - rect.top + 4}px` : "auto"
-    });
-    root.classList.toggle("opens-up", openUp);
-  }
-
-  _focusSelectRow(root, index) {
-    this._visibleRowInputs(root)[index]?.focus();
   }
 
   _scrollToSection(name) {
@@ -758,18 +433,11 @@ class ContainerRulesApp extends ContainerRulesApplication {
     this._refreshPropertyConflicts();
     if (this._hasErrors) {
       this._scrollToSection("properties");
-      this._selectRoot("requiredProperties")?.querySelector(".cr-combobox")?.focus();
+      this.multiselect.root("requiredProperties")?.querySelector(".cr-combobox")?.focus();
       return;
     }
 
-    const config = {
-      reductionPct: this.draft.reductionPct,
-      allowedTypes: [...this.draft.allowedTypes],
-      allowedSubtypes: [...this.draft.allowedSubtypes],
-      requiredProperties: [...this.draft.requiredProperties],
-      forbiddenProperties: [...this.draft.forbiddenProperties],
-      propertyMatchMode: this.draft.propertyMatchMode
-    };
+    const config = this.rules.toConfig();
 
     try {
       const currentItem = this.containerItem.parent?.items?.get(this.containerItem.id) ?? this.containerItem;
@@ -790,7 +458,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
       return;
     }
 
-    this._initialSnapshot = this._snapshot();
+    this._initialSnapshot = this.rules.snapshot();
     this._dirty = false;
     this._closingAfterSave = true;
     ui.notifications?.info(game.i18n.format(`${MODULE_ID}.configSet.notification`, {

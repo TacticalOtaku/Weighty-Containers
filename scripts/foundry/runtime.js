@@ -1,5 +1,10 @@
 import { LOG_LEVELS, MODULE_ID } from "../constants.js";
 import { clamp, getReductionPct, num } from "../core/weight.js";
+import {
+  ACTOR_PREPARE_DERIVED_DATA_PATH,
+  CONTAINER_DATA_MODEL_PATH,
+  getContainerDataModelClass
+} from "../integrations/dnd5e.js";
 
 export function registerModuleSettings(logger) {
   Hooks.once("init", () => {
@@ -87,9 +92,9 @@ export function patchContainerDataGetters({
   getCapacityLbs,
   lbsToDisplay
 }) {
-  const containerDataClass = CONFIG.Item.dataModels?.container;
+  const containerDataClass = getContainerDataModelClass();
   if (!containerDataClass) {
-    logger.error("Could not find ContainerData class at CONFIG.Item.dataModels.container");
+    logger.error(`Could not find ContainerData class at ${CONTAINER_DATA_MODEL_PATH}`);
     logger.warn("Falling back to DOM-based patching");
     registerDOMFallback({
       computeAdjustedLoad,
@@ -243,7 +248,7 @@ export function registerEncumbrancePatch({
   try {
     libWrapper.register(
       MODULE_ID,
-      "CONFIG.Actor.documentClass.prototype.prepareDerivedData",
+      ACTOR_PREPARE_DERIVED_DATA_PATH,
       function wcPrepareDerivedData(wrapped, ...args) {
         wrapped(...args);
         try {

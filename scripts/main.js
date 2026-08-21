@@ -2,7 +2,7 @@
 // Weighty Containers - Foundry VTT v14.367 / dnd5e 5.3.3
 // ─────────────────────────────────────────────────────────
 
-import { LBS_PER_KG, MODULE_ID } from "./constants.js";
+import { MODULE_ID } from "./constants.js";
 import {
   computeActorCarriedLbs as computeActorCarriedLbsCore,
   computeAdjustedLoad as computeAdjustedLoadCore
@@ -20,21 +20,14 @@ import {
   registerModuleSettings
 } from "./foundry/runtime.js";
 import { WCSocket } from "./foundry/socket.js";
+import {
+  getSystemWeightUnit,
+  getWeaponTypeMap,
+  lbsToDisplay
+} from "./integrations/dnd5e.js";
 import { registerSheetUiHooks } from "./ui/sheet-hooks.js";
 
 const wcSocket = new WCSocket(LOG);
-
-function getSystemWeightUnit() {
-  try {
-    return game.settings.get("dnd5e", "metricWeightUnits") ? "kg" : "lb";
-  } catch {
-    return "lb";
-  }
-}
-
-function lbsToDisplay(lbs) {
-  return getSystemWeightUnit() === "kg" ? lbs / LBS_PER_KG : lbs;
-}
 
 function getCapacityLbs(containerItem) {
   const capacityLbs = resolveCapacityLbs(containerItem, getSystemWeightUnit());
@@ -68,7 +61,7 @@ function computeActorCarriedLbs(actor) {
 
 function validateContainerRestrictions(containerItem, itemData) {
   return validateContainerRestrictionsCore(containerItem, itemData, {
-    weaponTypeMap: CONFIG.DND5E?.weaponTypeMap ?? {}
+    weaponTypeMap: getWeaponTypeMap()
   });
 }
 
