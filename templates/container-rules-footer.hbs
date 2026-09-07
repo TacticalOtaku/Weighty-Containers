@@ -1,11 +1,28 @@
 <footer class="cr-footer">
-  <button type="button" class="cr-button cr-button-secondary" data-action="cancel">
-    {{#if readOnly}}{{localize "weighty-containers.configDialog.close"}}{{else}}{{localize "weighty-containers.configDialog.cancel"}}{{/if}}
-  </button>
-  {{#unless readOnly}}
-  <button type="submit" class="cr-button cr-button-primary" data-save-button>
-    <i class="fas fa-floppy-disk" aria-hidden="true"></i>
-    <span>{{localize "weighty-containers.configDialog.save"}}</span>
-  </button>
-  {{/unless}}
+  <div class="cr-theme" role="group"
+       aria-label="{{localize 'weighty-containers.theme.label'}}">
+    {{#each themeOptions}}
+    <button type="button" class="cr-theme-option" data-action="setTheme"
+            data-theme="{{this.value}}" aria-pressed="{{this.active}}"
+            aria-label="{{this.label}}" data-tooltip="{{this.label}}">
+      <i class="{{this.icon}}" aria-hidden="true"></i>
+    </button>
+    {{/each}}
+  </div>
+
+  <div class="cr-footer-actions">
+    <button type="button" class="cr-btn cr-btn-text anvil-interactive" data-action="cancel">
+      {{#if readOnly}}
+        {{localize "weighty-containers.configDialog.close"}}
+      {{else}}
+        {{localize "weighty-containers.configDialog.cancel"}}
+      {{/if}}
+    </button>
+    {{#unless readOnly}}
+    <button type="submit" class="cr-btn cr-btn-filled anvil-interactive" data-save-button>
+      <i class="fas fa-check" aria-hidden="true"></i>
+      <span>{{localize "weighty-containers.configDialog.save"}}</span>
+    </button>
+    {{/unless}}
+  </div>
 </footer>

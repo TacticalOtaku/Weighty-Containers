@@ -6,6 +6,28 @@ owns the test character — a lot of the module's behaviour only differs there.
 
 ## Rules dialog
 
+### Anvil 2 visual regression
+
+- Open the rules dialog with Foundry light and dark themes and module theme Auto.
+- Pin the module to the opposite theme, change Foundry theme, and verify the pin holds.
+- Return to Auto and verify Foundry's theme is followed. Reopen to verify the client preference persists.
+- Keep two rules windows open and change module theme; both should update without losing drafts.
+- Change a rule and close: the confirmation should share the module theme. Continue preserves
+  the draft; discard retains its existing behavior.
+- Inspect all three tabs at 880px and 400px width, including long Russian labels.
+  Preset descriptions must wrap, tab labels remain visible, and Save stays accessible.
+- Open each multiselect near the bottom of the window and resize/move the window;
+  panels must remain readable and preserve their existing positioning behavior.
+- Use keyboard focus and OS reduced-motion mode. Focus rings remain visible;
+  decorative motion stops and the window is never blank.
+- Verify GM editing and player read-only mode with both palettes.
+- In a long subtype/property list, scroll to Shield (or another late option)
+  and click its label. Search, options and count must stay visible. Repeat with
+  End/Home + Space and with a group checkbox; only the options area should scroll.
+
+The offline fixture in `tools/preview-ui.mjs` checks presentation with actual
+Foundry CSS; these steps additionally verify the running application lifecycle.
+
 1. Open a container item and choose **Container Rules**.
 2. Confirm the window opens above the sheet, centered in the viewport, at a usable size.
 3. Confirm the weight preview reads **Current contents** and shows the container's

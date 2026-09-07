@@ -1,0 +1,114 @@
+{
+  "results": [
+    {
+      "theme": "light",
+      "width": 880,
+      "tab": "presets",
+      "scheme": "light",
+      "overflow": false,
+      "paneHeight": 315,
+      "footerVisible": true
+    },
+    {
+      "theme": "light",
+      "width": 880,
+      "tab": "restrictions",
+      "scheme": "light",
+      "overflow": false,
+      "paneHeight": 315,
+      "footerVisible": true
+    },
+    {
+      "theme": "light",
+      "width": 880,
+      "tab": "properties",
+      "scheme": "light",
+      "overflow": false,
+      "paneHeight": 315,
+      "footerVisible": true
+    },
+    {
+      "theme": "light",
+      "width": 400,
+      "tab": "presets",
+      "scheme": "light",
+      "overflow": false,
+      "paneHeight": 262,
+      "footerVisible": true
+    },
+    {
+      "theme": "light",
+      "width": 400,
+      "tab": "restrictions",
+      "scheme": "light",
+      "overflow": false,
+      "paneHeight": 262,
+      "footerVisible": true
+    },
+    {
+      "theme": "light",
+      "width": 400,
+      "tab": "properties",
+      "scheme": "light",
+      "overflow": false,
+      "paneHeight": 262,
+      "footerVisible": true
+    },
+    {
+      "theme": "dark",
+      "width": 880,
+      "tab": "presets",
+      "scheme": "dark",
+      "overflow": false,
+      "paneHeight": 315,
+      "footerVisible": true
+    },
+    {
+      "theme": "dark",
+      "width": 880,
+      "tab": "restrictions",
+      "scheme": "dark",
+      "overflow": false,
+      "paneHeight": 315,
+      "footerVisible": true
+    },
+    {
+      "theme": "dark",
+      "width": 880,
+      "tab": "properties",
+      "scheme": "dark",
+      "overflow": false,
+      "paneHeight": 315,
+      "footerVisible": true
+    },
+    {
+      "theme": "dark",
+      "width": 400,
+      "tab": "presets",
+      "scheme": "dark",
+      "overflow": false,
+      "paneHeight": 262,
+      "footerVisible": true
+    },
+    {
+      "theme": "dark",
+      "width": 400,
+      "tab": "restrictions",
+      "scheme": "dark",
+      "overflow": false,
+      "paneHeight": 262,
+      "footerVisible": true
+    },
+    {
+      "theme": "dark",
+      "width": 400,
+      "tab": "properties",
+      "scheme": "dark",
+      "overflow": false,
+      "paneHeight": 262,
+      "footerVisible": true
+    }
+  ],
+  "manualTheme": "passed",
+  "reducedMotion": "passed"
+}

@@ -50,7 +50,10 @@ const BUILT_IN = [
     id: "wc.quiver",
     label: `${MODULE_ID}.presets.quiver`,
     icon: "fas fa-arrow-right",
-    config: { allowedTypes: ["consumable"], allowedSubtypes: ["ammo", "ammunition"] }
+    // dnd5e 5.x calls this consumable subtype `ammo`. Listing a speculative
+    // `ammunition` alias alongside it does nothing except show up as a raw
+    // token wherever the selection is rendered back as labels.
+    config: { allowedTypes: ["consumable"], allowedSubtypes: ["ammo"] }
   },
   {
     id: "wc.potionBelt",
