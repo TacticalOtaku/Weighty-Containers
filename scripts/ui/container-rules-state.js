@@ -123,6 +123,23 @@ export class ContainerRulesState {
     return removeFrom;
   }
 
+  /**
+   * Apply a partial rule config, leaving anything it does not name alone.
+   * @param {Object} config
+   * @returns {string[]} the selection names that changed
+   */
+  applyConfig(config = {}) {
+    const touched = [];
+    if ("reductionPct" in config) this.setReductionPct(config.reductionPct);
+    for (const name of RULE_SELECTION_NAMES) {
+      if (!(name in config)) continue;
+      this.setSelection(name, config[name]);
+      touched.push(name);
+    }
+    if ("propertyMatchMode" in config) this.setPropertyMatchMode(config.propertyMatchMode);
+    return touched;
+  }
+
   previewAfter(baseWeight) {
     return Math.max(0, baseWeight * (1 - this.reductionPct / 100));
   }

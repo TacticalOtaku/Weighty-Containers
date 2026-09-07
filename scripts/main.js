@@ -11,23 +11,37 @@ import {
   validateContainerRestrictions as validateContainerRestrictionsCore
 } from "./core/restrictions.js";
 import { getCapacityLbs as resolveCapacityLbs } from "./core/weight.js";
-import { installDebugApi } from "./foundry/debug.js";
+import { installPublicApi } from "./foundry/api.js";
+import { buildDebugApi } from "./foundry/debug.js";
 import { registerEnforcementHooks } from "./foundry/enforcement.js";
 import { LOG } from "./foundry/logger.js";
 import {
   patchContainerDataGetters,
-  registerEncumbrancePatch,
-  registerModuleSettings
+  refreshPreparedActors,
+  registerModuleSettings,
+  registerUnitConversion
 } from "./foundry/runtime.js";
 import { WCSocket } from "./foundry/socket.js";
 import {
+  actorCurrencyLbs,
+  containerCurrencyLbs,
   getSystemWeightUnit,
   getWeaponTypeMap,
-  lbsToDisplay
+  lbsToDisplay,
+  makeEncumbranceItemFilter
 } from "./integrations/dnd5e.js";
+import { openReductionDialog } from "./ui/container-rules-app.js";
 import { registerSheetUiHooks } from "./ui/sheet-hooks.js";
 
 const wcSocket = new WCSocket(LOG);
+
+function includeNested() {
+  try {
+    return game.settings.get(MODULE_ID, "includeNested");
+  } catch {
+    return true;
+  }
+}
 
 function getCapacityLbs(containerItem) {
   const capacityLbs = resolveCapacityLbs(containerItem, getSystemWeightUnit());
@@ -42,19 +56,23 @@ function getCapacityLbs(containerItem) {
 
 function computeAdjustedLoad(actor, containerId, idx = null, memo = null, visited = null) {
   return computeAdjustedLoadCore(actor, containerId, {
-    includeNested: game.settings.get(MODULE_ID, "includeNested"),
+    includeNested: includeNested(),
     defaultUnit: getSystemWeightUnit(),
     index: idx,
     memo,
     visited,
+    currencyLbs: containerCurrencyLbs,
     onCycle: cycleId => LOG.warn("Cycle detected", { containerId: cycleId })
   });
 }
 
 function computeActorCarriedLbs(actor) {
   return computeActorCarriedLbsCore(actor, {
-    includeNested: game.settings.get(MODULE_ID, "includeNested"),
+    includeNested: includeNested(),
     defaultUnit: getSystemWeightUnit(),
+    validateItem: makeEncumbranceItemFilter(actor),
+    currencyLbs: containerCurrencyLbs,
+    actorCurrencyLbs: actorCurrencyLbs(actor),
     onCycle: containerId => LOG.warn("Cycle detected", { containerId })
   });
 }
@@ -74,30 +92,28 @@ function notifyExceedRemote(data) {
 }
 
 registerModuleSettings(LOG);
+registerUnitConversion(LOG);
 
 Hooks.once("ready", () => {
   wcSocket.register("notifyExceedRemote", notifyExceedRemote);
   wcSocket.init();
 
-  patchContainerDataGetters({
-    logger: LOG,
-    computeAdjustedLoad,
-    getCapacityLbs,
-    lbsToDisplay
-  });
-  registerEncumbrancePatch({
-    logger: LOG,
-    computeActorCarriedLbs,
-    lbsToDisplay
-  });
+  // The reduction rides on dnd5e's own contentsWeight, so the capacity bar,
+  // the inventory rows and the encumbrance track all pick it up from one patch.
+  const patched = patchContainerDataGetters({ logger: LOG });
+  if (patched) refreshPreparedActors(LOG);
+
   registerEnforcementHooks({ logger: LOG, socket: wcSocket });
   registerSheetUiHooks();
-  installDebugApi({
+  installPublicApi({
     computeActorCarriedLbs,
     computeAdjustedLoad,
     getCapacityLbs,
+    getSystemWeightUnit,
     lbsToDisplay,
-    validateContainerRestrictions
+    validateContainerRestrictions,
+    openRulesDialog: openReductionDialog,
+    debugApi: buildDebugApi({ computeAdjustedLoad, getCapacityLbs, lbsToDisplay })
   });
 
   LOG.info("ready", {

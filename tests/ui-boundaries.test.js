@@ -62,7 +62,8 @@ test("public dialog opener returns a rendered and centered ApplicationV2", async
       localize: key => key,
       format: key => key
     },
-    system: { documentTypes: { Item: [] } }
+    system: { documentTypes: { Item: [] } },
+    user: { isGM: true }
   };
   globalThis.foundry = {
     applications: {

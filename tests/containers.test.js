@@ -36,7 +36,7 @@ const item = ({
 
 const actor = items => ({ items: new ItemCollectionView(items) });
 
-test("computeAdjustedLoad applies each container's reduction to direct contents", () => {
+test("reductions compound through nested containers", () => {
   const top = item({ id: "top", type: "container", weight: 1, reduction: 50 });
   const nested = item({
     id: "nested",
@@ -49,8 +49,9 @@ test("computeAdjustedLoad applies each container's reduction to direct contents"
   const inner = item({ id: "inner", container: "nested", weight: 4 });
   const subject = actor([top, nested, direct, inner]);
 
-  assert.equal(computeAdjustedLoad(subject, "top").load, 8);
-  assert.equal(computeActorCarriedLbs(subject), 9);
+  // nested contents 4 * 0.75 = 3; top contents (2 + 3 + 8) * 0.5 = 6.5
+  assert.equal(computeAdjustedLoad(subject, "top").load, 6.5);
+  assert.equal(computeActorCarriedLbs(subject), 7.5);
 });
 
 test("collectContainerAncestorIds returns nearest-to-root order", () => {
@@ -91,7 +92,7 @@ test("changing only weight units is reflected in projected capacity checks", () 
 
   const violations = findCapacityViolations(current, projected);
   assert.equal(violations[0].container.id, "bag");
-  assert.equal(violations[0].afterLbs, 2.20462);
+  assert.equal(violations[0].afterLbs, 2.5);
 });
 
 test("moving between sibling containers does not double-count common ancestors", () => {

@@ -1,5 +1,11 @@
 import { MODULE_ID, PREVIEW_BASE_WEIGHT } from "../constants.js";
+import {
+  getRawContentsWeight,
+  getWeightUnitLabel
+} from "../integrations/dnd5e.js";
+import { getRulePreset, listRulePresets } from "./rule-presets.js";
 import { clamp, num } from "../core/weight.js";
+import { notifyContainerRulesUpdated } from "../foundry/api.js";
 import { LOG } from "../foundry/logger.js";
 import {
   containerConfigMatches,
@@ -45,7 +51,8 @@ class ContainerRulesApp extends ContainerRulesApplication {
       selectVisible: ContainerRulesApp._selectVisible,
       showUnavailable: ContainerRulesApp._showUnavailable,
       toggleSection: ContainerRulesApp._toggleSection,
-      toggleSelect: ContainerRulesApp._toggleSelect
+      toggleSelect: ContainerRulesApp._toggleSelect,
+      applyPreset: ContainerRulesApp._applyPreset
     }
   };
 
@@ -64,6 +71,9 @@ class ContainerRulesApp extends ContainerRulesApplication {
       window: { ...options.window, title }
     });
     this.containerItem = containerItem;
+    // Players who own the actor may look at the rules that just rejected their
+    // item; only a GM may change them.
+    this.readOnly = options.readOnly ?? !game.user?.isGM;
     this.rules = ContainerRulesState.fromItem(containerItem);
     this.multiselect = new ContainerRulesMultiselectController({
       rules: this.rules,
@@ -82,17 +92,42 @@ class ContainerRulesApp extends ContainerRulesApplication {
     this._motionReady = false;
   }
 
+  /**
+   * What the reduction slider previews against.
+   *
+   * The container's real contents when they can be read - a GM setting a bag
+   * of holding wants to see "13.5 -> 6.8 lb", not an abstract sample - falling
+   * back to the sample weight for an empty or compendium container.
+   */
+  _previewBasis() {
+    const raw = getRawContentsWeight(this.containerItem);
+    const unit = getWeightUnitLabel(this.containerItem?.system?.weight?.units);
+    if (typeof raw === "number" && raw > 0) return { base: raw, unit, actual: true };
+    return { base: PREVIEW_BASE_WEIGHT, unit, actual: false };
+  }
+
+  _formatWeight(value) {
+    return Number(value).toLocaleString(game.i18n.lang, { maximumFractionDigits: 2 });
+  }
+
   async _prepareContext(options) {
     const context = await super._prepareContext(options);
     const propertyGroups = this.rules.catalogs.requiredProperties;
+    const preview = this._previewBasis();
     return {
       ...context,
       containerName: this.containerItem.name,
+      readOnly: this.readOnly,
+      presets: this.readOnly ? [] : listRulePresets().map(preset => ({
+        id: preset.id,
+        icon: preset.icon,
+        label: game.i18n.localize(preset.label)
+      })),
       reductionPct: this.rules.reductionPct,
-      previewBefore: PREVIEW_BASE_WEIGHT,
-      previewAfter: this.rules.previewAfter(PREVIEW_BASE_WEIGHT).toLocaleString(game.i18n.lang, {
-        maximumFractionDigits: 1
-      }),
+      previewUnit: preview.unit,
+      previewIsActual: preview.actual,
+      previewBefore: this._formatWeight(preview.base),
+      previewAfter: this._formatWeight(this.rules.previewAfter(preview.base)),
       modeAll: this.rules.propertyMatchMode === "all",
       modeAny: this.rules.propertyMatchMode === "any",
       allowedTypesSelect: renderRuleMultiselect({
@@ -146,6 +181,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
 
     this._installDirtyIndicator();
     this._refreshAll();
+    this._applyReadOnly();
     requestAnimationFrame(() => {
       if (this.element !== renderedElement || !renderedElement.isConnected) return;
       renderedElement.classList.add("cr-ready");
@@ -222,6 +258,42 @@ class ContainerRulesApp extends ContainerRulesApplication {
 
   static _toggleSelect(event, target) {
     this.multiselect.toggle(target.dataset.selectName);
+  }
+
+  static _applyPreset(event, target) {
+    if (this.readOnly) return;
+    const preset = getRulePreset(target.dataset.presetId);
+    if (!preset) return;
+    const touched = this.rules.applyConfig(preset.config);
+    for (const name of touched) this.multiselect.syncSelection(name);
+    for (const input of this.element.querySelectorAll(
+      '[name="reductionPct"], [name="reductionRange"]'
+    )) {
+      input.value = this.rules.reductionPct;
+    }
+    const mode = this.element.querySelector(
+      `[name="propertyMatchMode"][value="${this.rules.propertyMatchMode}"]`
+    );
+    if (mode) mode.checked = true;
+    this._refreshAll();
+    ui.notifications?.info(game.i18n.format(`${MODULE_ID}.presets.applied`, {
+      preset: game.i18n.localize(preset.label)
+    }));
+  }
+
+  /** Lock every control when a non-GM is looking at the rules. */
+  _applyReadOnly() {
+    if (!this.readOnly) return;
+    this.element.classList.add("cr-readonly");
+    for (const control of this.element.querySelectorAll("input, button")) {
+      if (control.closest(".cr-nav")) continue;
+      control.disabled = true;
+    }
+    for (const combo of this.element.querySelectorAll(".cr-combobox")) {
+      combo.setAttribute("aria-disabled", "true");
+      combo.setAttribute("tabindex", "-1");
+    }
+    this.element.querySelector("[data-save-button]")?.remove();
   }
 
   _onInput(event) {
@@ -326,9 +398,9 @@ class ContainerRulesApp extends ContainerRulesApplication {
   }
 
   _refreshPreview() {
-    const after = this.rules.previewAfter(PREVIEW_BASE_WEIGHT);
+    const { base } = this._previewBasis();
     const value = this.element.querySelector("[data-preview-after]");
-    const formatted = after.toLocaleString(game.i18n.lang, { maximumFractionDigits: 1 });
+    const formatted = this._formatWeight(this.rules.previewAfter(base));
     const changed = value?.textContent !== formatted;
     if (value) value.textContent = formatted;
     const range = this.element.querySelector('[name="reductionRange"]');
@@ -430,6 +502,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
   }
 
   async _save() {
+    if (this.readOnly) return;
     this._refreshPropertyConflicts();
     if (this._hasErrors) {
       this._scrollToSection("properties");
@@ -461,6 +534,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
     this._initialSnapshot = this.rules.snapshot();
     this._dirty = false;
     this._closingAfterSave = true;
+    notifyContainerRulesUpdated(this.containerItem, config);
     ui.notifications?.info(game.i18n.format(`${MODULE_ID}.configSet.notification`, {
       containerName: this.containerItem.name
     }));
@@ -468,7 +542,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
   }
 }
 
-export async function openReductionDialog(containerItem) {
+export async function openReductionDialog(containerItem, options = {}) {
   if (!containerItem) {
     ui.notifications?.error(game.i18n.localize(`${MODULE_ID}.reductionDialog.errorNoItem`));
     return;
@@ -479,7 +553,7 @@ export async function openReductionDialog(containerItem) {
     existing.bringToFront();
     return existing;
   }
-  const app = new ContainerRulesApp(containerItem);
+  const app = new ContainerRulesApp(containerItem, options);
   OPEN_CONTAINER_RULE_APPS.set(key, app);
   app.addEventListener("close", () => OPEN_CONTAINER_RULE_APPS.delete(key), { once: true });
   await app.render({ force: true });

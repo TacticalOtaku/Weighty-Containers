@@ -1,11 +1,18 @@
 import {
+  containerOwnWeightLbs,
+  getCapacityCount,
   getCapacityLbs,
+  getItemQuantity,
   getReductionPct,
   isContainer,
+  isWeightlessContainer,
   ownWeightLbs
 } from "./weight.js";
 
 const LOAD_EPSILON = 0.00001;
+
+/** Currency is priced by the host; core stays free of game settings. */
+const NO_CURRENCY = () => 0;
 
 export class ItemCollectionView {
   constructor(items = []) {
@@ -55,6 +62,54 @@ export function collectContainerAncestorIds(actor, containerId) {
   return ancestors;
 }
 
+/**
+ * Number of items inside a container, including sub-container contents.
+ * Mirrors dnd5e's `contentsCount`, which sums quantities.
+ */
+export function computeContentsCount(actor, containerId, {
+  index = null,
+  visited = null
+} = {}) {
+  if (!actor || !containerId) return 0;
+  const containerIndex = index ?? buildContainerIndex(actor);
+  const visitedIds = visited ?? new Set();
+  if (visitedIds.has(containerId)) return 0;
+  visitedIds.add(containerId);
+
+  let count = 0;
+  for (const child of containerIndex.get(containerId) ?? []) {
+    count += getItemQuantity(child);
+    if (isContainer(child)) {
+      count += computeContentsCount(actor, child.id, {
+        index: containerIndex,
+        visited: visitedIds
+      });
+    }
+  }
+  visitedIds.delete(containerId);
+  return count;
+}
+
+/**
+ * Weight of everything inside a container, in pounds, with weight reductions
+ * applied.
+ *
+ * The shape mirrors dnd5e's ContainerData#contentsWeight so the two never
+ * disagree: children contribute their full total weight (a sub-container
+ * contributes its own weight plus its own already-reduced contents), the
+ * container's carried currency is included, and the container's reduction then
+ * scales the whole sum. Reductions therefore compound through nesting - a 50%
+ * bag holding a 50% pouch quarters what is in the pouch.
+ *
+ * @param {Object} actor
+ * @param {string} containerId
+ * @param {Object} [options]
+ * @param {boolean} [options.includeNested]  Walk into sub-containers.
+ * @param {string} [options.defaultUnit]     Unit assumed when an item declares none.
+ * @param {Function} [options.currencyLbs]   `(container) => number`
+ * @param {Function} [options.onCycle]       Called with the id that closed a cycle.
+ * @returns {{load: number, trace: Array}}
+ */
 export function computeAdjustedLoad(
   actor,
   containerId,
@@ -64,6 +119,7 @@ export function computeAdjustedLoad(
     index = null,
     memo = null,
     visited = null,
+    currencyLbs = NO_CURRENCY,
     onCycle = null
   } = {}
 ) {
@@ -74,32 +130,35 @@ export function computeAdjustedLoad(
   const memoMap = memo ?? new Map();
   const visitedIds = visited ?? new Set();
   const container = getItem(actor, containerId);
+
+  if (isWeightlessContainer(container)) {
+    return { load: 0, trace: [{ type: "weightless", id: containerId }] };
+  }
+
   const reduction = getReductionPct(container) / 100;
-  const memoKey = `${containerId}|${includeNested}|${defaultUnit}|${reduction}`;
+  const memoKey = `${containerId}|${includeNested}|${defaultUnit}`;
 
   if (memoMap.has(memoKey)) {
     return { load: memoMap.get(memoKey), trace };
   }
   if (visitedIds.has(containerId)) {
+    // Deliberately not memoized: reaching this container through a cycle says
+    // nothing about its load on a well-formed path.
     onCycle?.(containerId);
-    memoMap.set(memoKey, 0);
     return { load: 0, trace: [{ type: "cycle-break", id: containerId }] };
   }
 
   visitedIds.add(containerId);
-  let load = 0;
+  let raw = 0;
   for (const child of containerIndex.get(containerId) ?? []) {
-    const weightLbs = ownWeightLbs(child, defaultUnit);
-    const reducedWeight = weightLbs * (1 - reduction);
     if (isContainer(child)) {
-      load += reducedWeight;
+      const ownLbs = containerOwnWeightLbs(child, defaultUnit);
+      raw += ownLbs;
       trace.push({
         child: child.name,
         id: child.id,
         type: "container-self",
-        wLbs: weightLbs,
-        reduction,
-        added: reducedWeight
+        wLbs: ownLbs
       });
       if (includeNested) {
         const nested = computeAdjustedLoad(actor, child.id, {
@@ -108,9 +167,10 @@ export function computeAdjustedLoad(
           index: containerIndex,
           memo: memoMap,
           visited: visitedIds,
+          currencyLbs,
           onCycle
         });
-        load += nested.load;
+        raw += nested.load;
         trace.push({
           child: child.name,
           id: child.id,
@@ -119,43 +179,69 @@ export function computeAdjustedLoad(
         });
       }
     } else {
-      load += reducedWeight;
+      const weightLbs = ownWeightLbs(child, defaultUnit);
+      raw += weightLbs;
       trace.push({
         child: child.name,
         id: child.id,
         type: "item",
-        wLbs: weightLbs,
-        reduction,
-        added: reducedWeight
+        wLbs: weightLbs
       });
     }
   }
 
+  const currency = Number(currencyLbs(container)) || 0;
+  if (currency) {
+    raw += currency;
+    trace.push({ type: "currency", wLbs: currency });
+  }
+
   visitedIds.delete(containerId);
-  load = Math.max(0, Number(load.toFixed(5)));
+  const load = Math.max(0, Number((raw * (1 - reduction)).toFixed(5)));
+  trace.push({ type: "reduction", reduction, rawLbs: raw, load });
   memoMap.set(memoKey, load);
   return { load, trace };
 }
 
+/**
+ * Total weight an actor carries, in pounds, with reductions applied.
+ *
+ * @param {Object} actor
+ * @param {Object} [options]
+ * @param {Function} [options.validateItem]   `(item) => boolean`, mirrors dnd5e's filter.
+ * @param {Function} [options.currencyLbs]    `(document) => number`, for containers.
+ * @param {number} [options.actorCurrencyLbs] Weight of the actor's own coins.
+ */
 export function computeActorCarriedLbs(
   actor,
-  { includeNested = true, defaultUnit = "lb", onCycle = null } = {}
+  {
+    includeNested = true,
+    defaultUnit = "lb",
+    validateItem = null,
+    currencyLbs = NO_CURRENCY,
+    actorCurrencyLbs = 0,
+    onCycle = null
+  } = {}
 ) {
   if (!actor?.items) return 0;
-  let total = 0;
+  let total = Number(actorCurrencyLbs) || 0;
   const index = buildContainerIndex(actor);
   const memo = new Map();
   for (const item of actor.items) {
     if (item.system?.container) continue;
-    total += ownWeightLbs(item, defaultUnit);
+    if (validateItem && !validateItem(item)) continue;
     if (isContainer(item)) {
+      total += containerOwnWeightLbs(item, defaultUnit);
       total += computeAdjustedLoad(actor, item.id, {
         includeNested,
         defaultUnit,
         index,
         memo,
+        currencyLbs,
         onCycle
       }).load;
+    } else {
+      total += ownWeightLbs(item, defaultUnit);
     }
   }
   return Math.max(0, Number(total.toFixed(5)));
@@ -176,10 +262,22 @@ export function createProjectedActor(actor, candidateItem) {
   return { items: new ItemCollectionView(items) };
 }
 
+/**
+ * Containers that the projected change would push past their capacity.
+ *
+ * Both weight and item-count capacities are checked. A container that is
+ * already over capacity is only reported when the change makes it worse, so
+ * unrelated edits to items already inside are never blocked.
+ */
 export function findCapacityViolations(
   currentActor,
   projectedActor,
-  { includeNested = true, defaultUnit = "lb", onCycle = null } = {}
+  {
+    includeNested = true,
+    defaultUnit = "lb",
+    currencyLbs = NO_CURRENCY,
+    onCycle = null
+  } = {}
 ) {
   const violations = [];
   const currentIndex = buildContainerIndex(currentActor);
@@ -189,41 +287,52 @@ export function findCapacityViolations(
 
   for (const projectedContainer of projectedActor?.items ?? []) {
     if (!isContainer(projectedContainer)) continue;
-    const capacityLbs = getCapacityLbs(projectedContainer, defaultUnit);
-    if (!capacityLbs) continue;
+    if (isWeightlessContainer(projectedContainer)) continue;
 
     const currentContainer = getItem(currentActor, projectedContainer.id);
-    const beforeLbs = currentContainer
-      ? computeAdjustedLoad(currentActor, currentContainer.id, {
+    const countCapacity = getCapacityCount(projectedContainer);
+    const capacityLbs = countCapacity ? null : getCapacityLbs(projectedContainer, defaultUnit);
+    if (!countCapacity && !capacityLbs) continue;
+
+    const measure = countCapacity
+      ? (actorLike, index) => computeContentsCount(actorLike, projectedContainer.id, { index })
+      : (actorLike, index, memo) => computeAdjustedLoad(actorLike, projectedContainer.id, {
         includeNested,
         defaultUnit,
-        index: currentIndex,
-        memo: currentMemo,
+        index,
+        memo,
+        currencyLbs,
         onCycle
-      }).load
-      : 0;
-    const afterLbs = computeAdjustedLoad(projectedActor, projectedContainer.id, {
-      includeNested,
-      defaultUnit,
-      index: projectedIndex,
-      memo: projectedMemo,
-      onCycle
-    }).load;
-    const previousCapacityLbs = currentContainer
-      ? getCapacityLbs(currentContainer, defaultUnit)
-      : null;
-    const loadIncreased = afterLbs > beforeLbs + LOAD_EPSILON;
-    const capacityDecreased = previousCapacityLbs != null
-      && capacityLbs < previousCapacityLbs - LOAD_EPSILON;
+      }).load;
 
-    if (afterLbs > capacityLbs + LOAD_EPSILON
+    const before = currentContainer ? measure(currentActor, currentIndex, currentMemo) : 0;
+    const after = measure(projectedActor, projectedIndex, projectedMemo);
+    const capacity = countCapacity ?? capacityLbs;
+    const previousCapacity = currentContainer
+      ? (countCapacity
+        ? getCapacityCount(currentContainer)
+        : getCapacityLbs(currentContainer, defaultUnit))
+      : null;
+
+    const loadIncreased = after > before + LOAD_EPSILON;
+    const capacityDecreased = previousCapacity != null
+      && capacity < previousCapacity - LOAD_EPSILON;
+
+    if (after > capacity + LOAD_EPSILON
         && (loadIncreased || capacityDecreased || !currentContainer)) {
       violations.push({
         container: projectedContainer,
-        capacityLbs,
-        beforeLbs,
-        afterLbs,
-        deltaLbs: Math.max(0, afterLbs - beforeLbs)
+        kind: countCapacity ? "count" : "weight",
+        capacity,
+        before,
+        after,
+        delta: Math.max(0, after - before),
+        // Weight-shaped aliases kept for API consumers written against 3.4.0.
+        capacityLbs: countCapacity ? null : capacity,
+        capacityCount: countCapacity ?? null,
+        beforeLbs: countCapacity ? null : before,
+        afterLbs: countCapacity ? null : after,
+        deltaLbs: countCapacity ? null : Math.max(0, after - before)
       });
     }
   }
