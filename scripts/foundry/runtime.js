@@ -1,13 +1,18 @@
 import { LOG_LEVELS, MODULE_ID } from "../constants.js";
-import { clamp, getReductionPct, num } from "../core/weight.js";
+import { getReductionPct, num } from "../core/weight.js";
 import {
-  ACTOR_PREPARE_DERIVED_DATA_PATH,
   CONTAINER_DATA_MODEL_PATH,
-  getContainerDataModelClass
+  getContainerDataModelClass,
+  installUnitConversion
 } from "../integrations/dnd5e.js";
+
+export const NOTIFY_SCOPES = ["self", "selfAndGm", "everyone"];
 
 export function registerModuleSettings(logger) {
   Hooks.once("init", () => {
+    // i18n is initialised *after* the init hook, so localizing here would store
+    // raw keys. Foundry localizes setting names, hints and choice labels when
+    // it renders the settings form, so hand it keys and let it do that.
     game.settings.register(MODULE_ID, "enforceMode", {
       name: `${MODULE_ID}.enforceMode.name`,
       hint: `${MODULE_ID}.enforceMode.hint`,
@@ -16,8 +21,8 @@ export function registerModuleSettings(logger) {
       restricted: true,
       type: String,
       choices: {
-        block: game.i18n.localize(`${MODULE_ID}.enforceMode.block`),
-        warn: game.i18n.localize(`${MODULE_ID}.enforceMode.warn`)
+        block: `${MODULE_ID}.enforceMode.block`,
+        warn: `${MODULE_ID}.enforceMode.warn`
       },
       default: "block"
     });
@@ -30,6 +35,19 @@ export function registerModuleSettings(logger) {
       type: Boolean,
       default: true
     });
+    game.settings.register(MODULE_ID, "notifyScope", {
+      name: `${MODULE_ID}.notifyScope.name`,
+      hint: `${MODULE_ID}.notifyScope.hint`,
+      scope: "world",
+      config: true,
+      restricted: true,
+      type: String,
+      choices: Object.fromEntries(NOTIFY_SCOPES.map(scope => [
+        scope,
+        `${MODULE_ID}.notifyScope.${scope}`
+      ])),
+      default: "selfAndGm"
+    });
     game.settings.register(MODULE_ID, "logLevel", {
       name: `${MODULE_ID}.logLevel.name`,
       hint: `${MODULE_ID}.logLevel.hint`,
@@ -39,7 +57,7 @@ export function registerModuleSettings(logger) {
       type: String,
       choices: Object.fromEntries(LOG_LEVELS.map(level => [
         level,
-        game.i18n.localize(`${MODULE_ID}.logLevel.${level}`)
+        `${MODULE_ID}.logLevel.${level}`
       ])),
       default: "warn",
       onChange: value => logger.setLevel(value)
@@ -86,195 +104,101 @@ export function registerModuleSettings(logger) {
   });
 }
 
-export function patchContainerDataGetters({
-  logger,
-  computeAdjustedLoad,
-  getCapacityLbs,
-  lbsToDisplay
-}) {
+/**
+ * Adopt dnd5e's weight conversion table once CONFIG.DND5E is populated.
+ * Runs at `setup`, before any sheet or actor data is prepared for display.
+ */
+export function registerUnitConversion(logger) {
+  const install = () => {
+    if (installUnitConversion()) logger.info("weight conversion adopted from CONFIG.DND5E");
+    else logger.warn("CONFIG.DND5E.weightUnits not found - using built-in conversion");
+  };
+  Hooks.once("setup", install);
+  Hooks.once("ready", install);
+}
+
+/**
+ * Scale dnd5e's own contents weight by the container's reduction.
+ *
+ * Everything else is left to the system: `contentsWeight` already walks
+ * sub-containers, honours `weightlessContents`, adds carried currency and
+ * returns the number in the container's own `weight.units`. Because
+ * `ContainerData#totalWeight` is built on this getter, and the actor's
+ * encumbrance is built on `totalWeightIn()`, patching this one place makes the
+ * reduction show up on the capacity bar, the inventory row and the encumbrance
+ * track at once - with no second implementation to drift out of sync.
+ */
+export function patchContainerDataGetters({ logger }) {
   const containerDataClass = getContainerDataModelClass();
   if (!containerDataClass) {
-    logger.error(`Could not find ContainerData class at ${CONTAINER_DATA_MODEL_PATH}`);
-    logger.warn("Falling back to DOM-based patching");
-    registerDOMFallback({
-      computeAdjustedLoad,
-      getCapacityLbs,
-      lbsToDisplay
-    });
-    return;
+    logger.error(
+      `Could not find ContainerData at ${CONTAINER_DATA_MODEL_PATH}. `
+      + "Weight reduction will not be applied to sheets or encumbrance."
+    );
+    return false;
   }
 
   const prototype = containerDataClass.prototype;
-  const contentsDescriptor = Object.getOwnPropertyDescriptor(
-    prototype,
-    "contentsWeight"
-  );
-  if (contentsDescriptor?.get) {
-    const originalContentsWeight = contentsDescriptor.get;
-    Object.defineProperty(prototype, "contentsWeight", {
-      get() {
-        const rawValue = originalContentsWeight.call(this);
-        const item = this.parent;
-        if (!item || getReductionPct(item) === 0 || !item.parent) {
-          return rawValue;
-        }
-        const adjustedLbs = computeAdjustedLoad(item.parent, item.id).load;
-        const adjustedDisplay = Number(lbsToDisplay(adjustedLbs).toFixed(2));
-        logger.trace("contentsWeight getter override", {
-          container: item.name,
-          raw: rawValue,
-          adjusted: adjustedDisplay,
-          reduction: getReductionPct(item)
-        });
-        return adjustedDisplay;
-      },
-      configurable: true,
-      enumerable: contentsDescriptor.enumerable ?? true
-    });
-    logger.info("Patched ContainerData.contentsWeight getter");
-  } else {
-    logger.warn("contentsWeight getter not found on ContainerData prototype", {
-      descriptor: contentsDescriptor,
+  if (prototype[`__${MODULE_ID}_patched`]) {
+    logger.debug("ContainerData already patched");
+    return true;
+  }
+
+  const descriptor = Object.getOwnPropertyDescriptor(prototype, "contentsWeight");
+  if (!descriptor?.get) {
+    logger.error("contentsWeight getter not found on ContainerData prototype", {
       protoKeys: Object.getOwnPropertyNames(prototype)
     });
+    return false;
   }
 
-  const totalDescriptor = Object.getOwnPropertyDescriptor(
-    prototype,
-    "totalWeight"
+  const original = descriptor.get;
+  const scale = (value, reduction) => Math.max(
+    0,
+    Number(((Number(value) || 0) * (1 - reduction)).toFixed(4))
   );
-  if (totalDescriptor?.get) {
-    const originalTotalWeight = totalDescriptor.get;
-    Object.defineProperty(prototype, "totalWeight", {
-      get() {
-        const item = this.parent;
-        if (!item || getReductionPct(item) === 0) {
-          return originalTotalWeight.call(this);
-        }
-        const ownWeight = num(this.weight?.value, 0) * num(this.quantity, 1);
-        const contentsWeight = this.contentsWeight;
-        const currencyWeight = num(this.currencyWeight, 0);
-        const total = Number((
-          ownWeight + contentsWeight + currencyWeight
-        ).toFixed(2));
-        logger.trace("totalWeight getter override", {
-          container: item.name,
-          own: ownWeight,
-          contents: contentsWeight,
-          currency: currencyWeight,
-          total
-        });
-        return total;
-      },
-      configurable: true,
-      enumerable: totalDescriptor.enumerable ?? true
-    });
-    logger.info("Patched ContainerData.totalWeight getter");
-  } else {
-    logger.debug("totalWeight getter not found — may not be needed");
-  }
+
+  Object.defineProperty(prototype, "contentsWeight", {
+    get() {
+      const raw = original.call(this);
+      const reduction = getReductionPct(this.parent) / 100;
+      if (!reduction) return raw;
+      // Compendium containers resolve their contents asynchronously.
+      if (raw instanceof Promise) return raw.then(value => scale(value, reduction));
+      return scale(raw, reduction);
+    },
+    configurable: true,
+    enumerable: descriptor.enumerable ?? true
+  });
+  Object.defineProperty(prototype, `__${MODULE_ID}_patched`, {
+    value: true,
+    enumerable: false
+  });
+  logger.info("Patched ContainerData.contentsWeight getter");
+  return true;
 }
 
-function registerDOMFallback({
-  computeAdjustedLoad,
-  getCapacityLbs,
-  lbsToDisplay
-}) {
-  const onRender = (app, element) => {
-    const root = element instanceof HTMLElement
-      ? element
-      : element?.[0] ?? element;
-    if (!(root instanceof HTMLElement)) return;
-
-    const item = app?.document ?? app?.item ?? app?.object;
-    if (!(item instanceof Item)
-        || item.type !== "container"
-        || !item.parent
-        || getReductionPct(item) === 0) {
-      return;
+/**
+ * Recompute every actor once after the patch lands.
+ *
+ * Actor data is prepared during world load, before `ready`, so without this the
+ * first thing a GM sees is the unreduced encumbrance until something happens to
+ * touch the actor.
+ */
+export function refreshPreparedActors(logger) {
+  let refreshed = 0;
+  for (const actor of game.actors ?? []) {
+    try {
+      actor.reset();
+      refreshed += 1;
+    } catch (error) {
+      logger.warn("Could not refresh actor after patching", { actor: actor?.name, error });
     }
-
-    const capacityLbs = getCapacityLbs(item);
-    if (!capacityLbs) return;
-    const loadDisplay = lbsToDisplay(
-      computeAdjustedLoad(item.parent, item.id).load
-    );
-    const capacityDisplay = lbsToDisplay(capacityLbs);
-    const percentage = capacityDisplay > 0
-      ? clamp(Math.round((loadDisplay / capacityDisplay) * 100), 0, 100)
-      : 0;
-
-    const meter = root.querySelector('[role="meter"]');
-    if (meter) {
-      meter.setAttribute("aria-valuenow", String(loadDisplay.toFixed(2)));
-      meter.setAttribute("aria-valuemax", String(capacityDisplay.toFixed(2)));
-      const fill = meter.querySelector(".fill, .bar, [style]");
-      if (fill) fill.style.width = `${percentage}%`;
-    }
-
-    const ratioPattern = /([0-9]+(?:[.,][0-9]+)?)\s*\/\s*([0-9]+(?:[.,][0-9]+)?)/;
-    const walker = document.createTreeWalker(
-      root,
-      NodeFilter.SHOW_TEXT,
-      null
-    );
-    let node;
-    while ((node = walker.nextNode())) {
-      const match = node.textContent.match(ratioPattern);
-      if (!match) continue;
-      const renderedMaximum = Number(match[2].replace(",", "."));
-      if (Math.abs(renderedMaximum - capacityDisplay) >= 0.1) continue;
-      node.textContent = node.textContent.replace(
-        ratioPattern,
-        `${loadDisplay.toFixed(2)} / ${capacityDisplay.toFixed(2)}`
-      );
-      break;
-    }
-  };
-
-  Hooks.on("renderItemSheet", onRender);
-  Hooks.on("renderContainerSheet", onRender);
-}
-
-export function registerEncumbrancePatch({
-  logger,
-  computeActorCarriedLbs,
-  lbsToDisplay
-}) {
-  if (typeof libWrapper === "undefined") {
-    logger.error("lib-wrapper not found!");
-    return;
   }
-  try {
-    libWrapper.register(
-      MODULE_ID,
-      ACTOR_PREPARE_DERIVED_DATA_PATH,
-      function wcPrepareDerivedData(wrapped, ...args) {
-        wrapped(...args);
-        try {
-          const encumbrance = this.system?.attributes?.encumbrance;
-          if (!encumbrance) return;
-          encumbrance.value = Number(
-            lbsToDisplay(computeActorCarriedLbs(this)).toFixed(2)
-          );
-          encumbrance.pct = encumbrance.max > 0
-            ? clamp(
-              Math.round((encumbrance.value / encumbrance.max) * 100),
-              0,
-              100
-            )
-            : 0;
-        } catch (error) {
-          logger.error("Encumbrance patch failed", {
-            actor: this?.name,
-            error
-          });
-        }
-      },
-      "WRAPPER"
-    );
-    logger.info("libWrapper: Actor.prepareDerivedData patched");
-  } catch (error) {
-    logger.error("Failed to register libWrapper for Actor.prepareDerivedData", error);
+  for (const token of game.scenes?.contents?.flatMap(scene => scene.tokens.contents) ?? []) {
+    if (token.actorLink || !token.actor) continue;
+    try { token.actor.reset(); } catch {}
   }
+  logger.info("refreshed prepared actors", { refreshed });
+  return refreshed;
 }

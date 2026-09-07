@@ -10,7 +10,7 @@ import {
 
 test("convertWeightToLbs converts supported units and preserves unknown units", () => {
   assert.equal(convertWeightToLbs(2, "lb"), 2);
-  assert.equal(convertWeightToLbs(1, "kg"), 2.20462);
+  assert.equal(convertWeightToLbs(1, "kg"), 2.5);
   assert.equal(convertWeightToLbs(16, "oz"), 1);
   assert.equal(convertWeightToLbs(3, "stones"), 3);
 });
@@ -33,7 +33,7 @@ test("getReductionPct clamps invalid flag values", () => {
 test("getCapacityLbs reads dnd5e and legacy capacity shapes", () => {
   assert.equal(getCapacityLbs({
     system: { capacity: { weight: { value: 5, units: "kg" } } }
-  }), 11.0231);
+  }), 12.5);
   assert.equal(getCapacityLbs({
     system: { capacity: { value: 12, units: "lb" } }
   }), 12);

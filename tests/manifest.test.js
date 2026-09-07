@@ -12,9 +12,14 @@ test("package metadata uses one module version", async () => {
     readJson("package.json")
   ]);
 
-  assert.equal(manifest.version, "3.3.5");
-  assert.equal(pkg.version, manifest.version);
-  assert.match(manifest.download, /\/v3\.3\.5\/weighty-containers-v3\.3\.5\.zip$/);
+  // Derived from the manifest rather than hardcoded, so a version bump is one edit.
+  const { version } = manifest;
+  assert.match(version, /^\d+\.\d+\.\d+$/);
+  assert.equal(pkg.version, version);
+  assert.match(
+    manifest.download,
+    new RegExp(`/v${version.replace(/\./g, "\\.")}/weighty-containers-v${version.replace(/\./g, "\\.")}\\.zip$`)
+  );
 });
 
 test("manifest is verified for Foundry 14.367", async () => {

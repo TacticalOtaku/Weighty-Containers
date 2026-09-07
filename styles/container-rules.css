@@ -1274,3 +1274,83 @@ body.theme-dark .container-rules {
     transition-duration: .01ms !important;
   }
 }
+
+/* ── Rule presets ─────────────────────────────────────── */
+
+.container-rules .cr-preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.container-rules .cr-preset {
+  align-items: center;
+  background: var(--cr-surface);
+  border: 1px solid var(--cr-border);
+  border-radius: var(--cr-radius-md);
+  color: var(--cr-text);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 6px;
+  line-height: 1;
+  padding: 7px 10px;
+  transition:
+    background var(--cr-motion-fast) var(--cr-ease),
+    border-color var(--cr-motion-fast) var(--cr-ease),
+    transform var(--cr-motion-fast) var(--cr-ease);
+  white-space: nowrap;
+  width: auto;
+}
+
+.container-rules .cr-preset:hover:not(:disabled) {
+  background: var(--cr-accent-soft);
+  border-color: var(--cr-accent-border);
+  transform: translateY(-1px);
+}
+
+.container-rules .cr-preset:focus-visible {
+  box-shadow: var(--cr-focus-ring);
+  outline: none;
+}
+
+.container-rules .cr-preset i {
+  color: var(--cr-accent);
+  font-size: 12px;
+}
+
+.container-rules .cr-preview em {
+  color: var(--cr-text-muted);
+  font-size: 13px;
+  font-style: normal;
+}
+
+/* ── Read-only view (players) ─────────────────────────── */
+
+.container-rules .cr-readonly-banner {
+  align-items: center;
+  background: var(--cr-warning-soft);
+  border: 1px solid color-mix(in srgb, var(--cr-warning) 34%, var(--cr-border));
+  border-radius: var(--cr-radius-md);
+  color: var(--cr-text);
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+}
+
+.container-rules .cr-readonly-banner i {
+  color: var(--cr-warning);
+}
+
+.container-rules.cr-readonly .cr-multiselect,
+.container-rules.cr-readonly .cr-reduction-grid {
+  opacity: .78;
+  pointer-events: none;
+}
+
+.container-rules.cr-readonly .cr-select-clear,
+.container-rules.cr-readonly .cr-select-toggle {
+  display: none;
+}

@@ -72,20 +72,29 @@ export function registerSheetUiHooks() {
 function _ensureInlineGear(app, element) {
   const doc = app?.document ?? app?.item ?? app?.object;
   if (!(doc instanceof Item) || doc.type !== "container") return;
-  if (!game.user.isGM) return;
+
+  // A GM configures the rules; anyone who owns the container may read them, so
+  // a player can see why their bag just refused an item.
+  const isGM = game.user.isGM;
+  if (!isGM && !doc.isOwner) return;
 
   const header = element.querySelector(".sheet-header, header.sheet-header, .item-header, .window-header");
   if (!header) return;
   if (header.querySelector(".wc-inline-gear")) return;
 
-  const btn = document.createElement("span");
+  const label = game.i18n.localize(
+    `${MODULE_ID}.${isGM ? "configBtn.title" : "configBtn.view"}`
+  );
+  const btn = document.createElement("button");
+  btn.type = "button";
   btn.className = "wc-inline-gear";
-  btn.title = game.i18n.localize(`${MODULE_ID}.configBtn.title`);
-  btn.innerHTML = '<i class="fas fa-cog"></i>';
-  btn.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    openReductionDialog(doc);
+  btn.title = label;
+  btn.setAttribute("aria-label", label);
+  btn.innerHTML = `<i class="fas ${isGM ? "fa-cog" : "fa-eye"}" inert></i>`;
+  btn.addEventListener("click", event => {
+    event.preventDefault();
+    event.stopPropagation();
+    openReductionDialog(doc, { readOnly: !isGM });
   });
 
   const controls = header.querySelector(".header-controls, .controls, .toggles, .item-controls, .window-title");

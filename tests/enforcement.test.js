@@ -10,7 +10,8 @@ const item = ({
   container = null,
   weight = 0,
   units = "lb",
-  capacity = null
+  capacity = null,
+  quantity = 1
 }) => ({
   id,
   name: id,
@@ -18,7 +19,8 @@ const item = ({
   system: {
     container,
     weight: { value: weight, units },
-    quantity: 1,
+    quantity,
+    properties: new Set(),
     ...(capacity == null
       ? {}
       : { capacity: { weight: { value: capacity, units: "lb" } } })
@@ -85,7 +87,12 @@ const setup = items => {
     },
     i18n: {
       format(key) { return key; }
-    }
+    },
+    user: { id: "u1", isGM: false },
+    users: [
+      { id: "u1", active: true, isGM: false },
+      { id: "gm", active: true, isGM: true }
+    ]
   };
   globalThis.foundry = {
     utils: {
@@ -106,7 +113,7 @@ const setup = items => {
       warn() {}
     },
     socket: {
-      executeForEveryone(...args) { socketCalls.push(args); }
+      executeForUsers(name, users, ...args) { socketCalls.push([name, ...args, users]); }
     }
   });
   return { actor, hooks, socketCalls };
@@ -123,7 +130,7 @@ test("preUpdateItem blocks a flattened weight-unit change that exceeds capacity"
   const { hooks, socketCalls } = setup([bag, payload]);
 
   assert.equal(
-    hooks.preUpdateItem(payload, { "system.weight.units": "kg" }),
+    hooks.preUpdateItem(payload, { "system.weight.units": "kg" }, {}),
     false
   );
   assert.equal(socketCalls.length, 1);
@@ -146,7 +153,50 @@ test("preCreateItem blocks an overflowing ancestor container", () => {
   });
   payload.parent = actor;
 
-  assert.equal(hooks.preCreateItem(payload, {}), false);
+  assert.equal(hooks.preCreateItem(payload, {}, {}), false);
   assert.equal(socketCalls.length, 1);
   assert.equal(socketCalls[0][1].containerName, "outer");
+});
+
+test("edits to an item already inside a rule-breaking container are not blocked", () => {
+  const bag = item({ id: "bag", type: "container", capacity: 100 });
+  bag.flags = { "weighty-containers": { allowedTypes: ["consumable"] } };
+  const sword = item({ id: "sword", type: "weapon", container: "bag", weight: 6 });
+  const { hooks, socketCalls } = setup([bag, sword]);
+
+  // The sword does not satisfy the bag's rules, but it is already inside:
+  // equipping or renaming it must still go through, silently.
+  assert.equal(hooks.preUpdateItem(sword, { "system.equipped": true }, {}), undefined);
+  assert.equal(hooks.preUpdateItem(sword, { name: "Renamed" }, {}), undefined);
+  assert.equal(socketCalls.length, 0);
+});
+
+test("moving an item into a container it does not satisfy is still blocked", () => {
+  const bag = item({ id: "bag", type: "container", capacity: 100 });
+  bag.flags = { "weighty-containers": { allowedTypes: ["consumable"] } };
+  const sword = item({ id: "sword", type: "weapon", weight: 6 });
+  const { hooks, socketCalls } = setup([bag, sword]);
+
+  assert.equal(hooks.preUpdateItem(sword, { "system.container": "bag" }, {}), false);
+  assert.equal(socketCalls.length, 1);
+});
+
+test("callers can opt out of enforcement for a single operation", () => {
+  const bag = item({ id: "bag", type: "container", capacity: 1 });
+  const brick = item({ id: "brick", weight: 50 });
+  const { hooks, socketCalls } = setup([bag, brick]);
+
+  const bypass = { "weighty-containers": { bypass: true } };
+  assert.equal(hooks.preUpdateItem(brick, { "system.container": "bag" }, bypass), undefined);
+  assert.equal(socketCalls.length, 0);
+});
+
+test("rejections go to the acting user, owners and GMs - not the whole table", () => {
+  const bag = item({ id: "bag", type: "container", capacity: 1 });
+  const brick = item({ id: "brick", weight: 50 });
+  const { hooks, socketCalls } = setup([bag, brick]);
+
+  assert.equal(hooks.preUpdateItem(brick, { "system.container": "bag" }, {}), false);
+  const recipients = socketCalls[0].at(-1);
+  assert.deepEqual(recipients.sort(), ["gm", "u1"]);
 });

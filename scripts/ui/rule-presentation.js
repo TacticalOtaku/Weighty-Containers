@@ -10,7 +10,8 @@ import {
   getItemTypeLabels,
   getPropertyCatalogs,
   getSubtypeCatalogs,
-  getValidPropertiesByItemType
+  getValidPropertiesByItemType,
+  isPhysicalItemType
 } from "../integrations/dnd5e.js";
 
 export function escapeHtml(value) {
@@ -81,13 +82,20 @@ function valuesFromConfig(config) {
   return values;
 }
 
+// Only item types that can physically sit in a container are offered. Spells,
+// classes and feats can never be put in a bag, and listing them buries the
+// handful of types a GM actually wants.
 export function getRuleItemTypeGroups() {
   const itemTypes = new Map();
 
-  for (const type of valuesFromConfig(getItemDocumentTypes())) addOption(itemTypes, type, `TYPES.Item.${type}`);
-  for (const [type, label] of Object.entries(getItemTypeLabels())) addOption(itemTypes, type, label);
+  for (const type of valuesFromConfig(getItemDocumentTypes())) {
+    if (isPhysicalItemType(type)) addOption(itemTypes, type, `TYPES.Item.${type}`);
+  }
+  for (const [type, label] of Object.entries(getItemTypeLabels())) {
+    if (isPhysicalItemType(type)) addOption(itemTypes, type, label);
+  }
 
-  for (const type of ["weapon", "consumable", "equipment", "tool", "loot", "container", "backpack", "spell", "feat"]) {
+  for (const type of ["weapon", "consumable", "equipment", "tool", "loot", "container"]) {
     addOption(itemTypes, type, `TYPES.Item.${type}`);
   }
 

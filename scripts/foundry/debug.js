@@ -2,12 +2,19 @@ import { buildContainerIndex } from "../core/containers.js";
 import { getContainerRestrictions } from "../core/restrictions.js";
 import { getReductionPct, isContainer } from "../core/weight.js";
 
-export function installDebugApi({
-  computeActorCarriedLbs,
+/**
+ * Console-only helpers.
+ *
+ * These print to the console and are free to change shape, so they stay out of
+ * the supported surface in `foundry/api.js`; that module merges them into
+ * `globalThis.weightyCont` for use from the dev console.
+ *
+ * @returns {Object} the debug helpers
+ */
+export function buildDebugApi({
   computeAdjustedLoad,
   getCapacityLbs,
-  lbsToDisplay,
-  validateContainerRestrictions
+  lbsToDisplay
 }) {
   const findOpenApps = () => {
     if (!(foundry.applications?.instances instanceof Map)) return [];
@@ -24,16 +31,7 @@ export function installDebugApi({
     return null;
   };
 
-  const api = {
-    apiVersion: 1,
-    stability: "unstable",
-    computeActorCarriedLbs,
-    computeAdjustedLoad,
-    getCapacityLbs,
-    getReductionPct,
-    getContainerRestrictions,
-    validateContainerRestrictions,
-
+  return {
     dumpContainer(itemOrName) {
       let item = null;
       if (itemOrName instanceof Item) {
@@ -103,10 +101,4 @@ export function installDebugApi({
       return result;
     }
   };
-
-  Object.defineProperty(globalThis, "weightyCont", {
-    value: Object.freeze(api),
-    configurable: true,
-    writable: false
-  });
 }

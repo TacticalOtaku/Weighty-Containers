@@ -25,6 +25,12 @@
   </nav>
 
   <main class="cr-main">
+    {{#if readOnly}}
+    <div class="cr-readonly-banner">
+      <i class="fas fa-eye" aria-hidden="true"></i>
+      <span>{{localize "weighty-containers.configDialog.readOnly"}}</span>
+    </div>
+    {{/if}}
     <section class="cr-section" data-section="basic">
       <button type="button" class="cr-section-heading" data-action="toggleSection">
         <span class="cr-section-heading-copy">
@@ -50,11 +56,28 @@
               <div class="cr-slider-scale" aria-hidden="true"><span>0%</span><span>50%</span><span>100%</span></div>
             </div>
             <div class="cr-preview" aria-live="polite">
-              <span><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i>{{localize "weighty-containers.configDialog.previewWeight"}}</span>
-              <strong>{{previewBefore}} <i class="fas fa-arrow-right-long" aria-hidden="true"></i> <b data-preview-after>{{previewAfter}}</b></strong>
+              <span><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i>{{#if previewIsActual}}{{localize "weighty-containers.configDialog.previewContents"}}{{else}}{{localize "weighty-containers.configDialog.previewWeight"}}{{/if}}</span>
+              <strong>{{previewBefore}} <i class="fas fa-arrow-right-long" aria-hidden="true"></i> <b data-preview-after>{{previewAfter}}</b> <em>{{previewUnit}}</em></strong>
             </div>
           </div>
         </div>
+
+        {{#if presets}}
+        <div class="cr-card cr-presets-card">
+          <div class="cr-card-titlebar">
+            <span class="cr-card-symbol cr-tone-preset" aria-hidden="true"><i class="fas fa-wand-sparkles"></i></span>
+            <div class="cr-field-label">{{localize "weighty-containers.presets.label"}}</div>
+          </div>
+          <div class="cr-preset-row">
+            {{#each presets}}
+            <button type="button" class="cr-preset" data-action="applyPreset" data-preset-id="{{this.id}}">
+              <i class="{{this.icon}}" aria-hidden="true"></i><span>{{this.label}}</span>
+            </button>
+            {{/each}}
+          </div>
+          <p class="cr-hint">{{localize "weighty-containers.presets.hint"}}</p>
+        </div>
+        {{/if}}
       </div>
     </section>
 
