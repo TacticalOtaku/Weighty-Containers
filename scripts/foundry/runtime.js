@@ -8,6 +8,12 @@ import {
 
 export const NOTIFY_SCOPES = ["self", "selfAndGm", "everyone"];
 
+/**
+ * Theme for this module's own windows.
+ * `auto` follows Foundry, which in turn can follow the operating system.
+ */
+export const THEMES = ["auto", "light", "dark"];
+
 export function registerModuleSettings(logger) {
   Hooks.once("init", () => {
     // i18n is initialised *after* the init hook, so localizing here would store
@@ -47,6 +53,24 @@ export function registerModuleSettings(logger) {
         `${MODULE_ID}.notifyScope.${scope}`
       ])),
       default: "selfAndGm"
+    });
+    game.settings.register(MODULE_ID, "theme", {
+      name: `${MODULE_ID}.theme.name`,
+      hint: `${MODULE_ID}.theme.hint`,
+      scope: "client",
+      config: true,
+      restricted: false,
+      type: String,
+      choices: Object.fromEntries(THEMES.map(theme => [
+        theme,
+        `${MODULE_ID}.theme.${theme}`
+      ])),
+      default: "auto",
+      onChange: () => {
+        for (const app of foundry.applications?.instances?.values() ?? []) {
+          app.applyAnvilTheme?.();
+        }
+      }
     });
     game.settings.register(MODULE_ID, "logLevel", {
       name: `${MODULE_ID}.logLevel.name`,

@@ -28,7 +28,8 @@ const ContainerRulesApplication = foundry.applications.api.HandlebarsApplication
 class ContainerRulesApp extends ContainerRulesApplication {
   static DEFAULT_OPTIONS = {
     id: `${MODULE_ID}-rules`,
-    classes: ["container-rules"],
+    // `anvil` opts this window into the design system in styles/anvil.css.
+    classes: ["container-rules", "anvil"],
     tag: "form",
     position: { ...CONTAINER_RULES_WINDOW_SIZE },
     window: {
@@ -47,13 +48,20 @@ class ContainerRulesApp extends ContainerRulesApplication {
       removeSelection: ContainerRulesApp._removeSelection,
       removeUnavailable: ContainerRulesApp._removeUnavailable,
       resolveConflict: ContainerRulesApp._resolveConflict,
-      scrollSection: ContainerRulesApp._scrollSection,
+      selectTab: ContainerRulesApp._selectTabAction,
       selectVisible: ContainerRulesApp._selectVisible,
       showUnavailable: ContainerRulesApp._showUnavailable,
-      toggleSection: ContainerRulesApp._toggleSection,
       toggleSelect: ContainerRulesApp._toggleSelect,
-      applyPreset: ContainerRulesApp._applyPreset
+      applyPreset: ContainerRulesApp._applyPreset,
+      setTheme: ContainerRulesApp._setTheme
     }
+  };
+
+  /** Presentation only — icons for the three theme choices. */
+  static THEME_ICONS = {
+    auto: "fas fa-circle-half-stroke",
+    light: "fas fa-sun",
+    dark: "fas fa-moon"
   };
 
   static PARTS = {
@@ -85,6 +93,9 @@ class ContainerRulesApp extends ContainerRulesApplication {
       }
     });
     this._initialSnapshot = this.rules.snapshot();
+    // Presets are the first thing a GM reaches for and the one thing a player
+    // cannot use, so the opening pane differs by role.
+    this.activeTab = this.readOnly ? "restrictions" : "presets";
     this._dirty = false;
     this._hasErrors = false;
     this._closingAfterSave = false;
@@ -110,6 +121,86 @@ class ContainerRulesApp extends ContainerRulesApplication {
     return Number(value).toLocaleString(game.i18n.lang, { maximumFractionDigits: 2 });
   }
 
+  /** The stored preference, defaulting to following Foundry. */
+  get theme() {
+    try {
+      return game.settings.get(MODULE_ID, "theme") ?? "auto";
+    } catch {
+      return "auto";
+    }
+  }
+
+  /**
+   * Pin the window to a theme, or let it follow Foundry.
+   *
+   * `auto` removes the attribute rather than setting it, so the CSS
+   * falls through to Foundry's body class and, failing that, to the
+   * operating system — with no JS involved in the decision.
+   */
+  applyAnvilTheme() {
+    const root = this.element;
+    if (!root) return;
+    const theme = this.theme;
+    if (theme === "light" || theme === "dark") root.dataset.avTheme = theme;
+    else delete root.dataset.avTheme;
+    for (const button of root.querySelectorAll("[data-action='setTheme']")) {
+      button.setAttribute("aria-pressed", String(button.dataset.theme === theme));
+    }
+  }
+
+  /**
+   * A one-line description of what a preset actually sets.
+   *
+   * "Quiver" tells a GM nothing on its own. Reading the preset's own config
+   * back into labels means third-party presets get a description too, without
+   * their authors having to write one.
+   */
+  _describePreset(config = {}) {
+    const bits = [];
+    if (typeof config.reductionPct === "number") {
+      bits.push(`${config.reductionPct}%`);
+    }
+    for (const name of ["allowedTypes", "allowedSubtypes", "requiredProperties", "forbiddenProperties"]) {
+      const values = config[name];
+      if (!Array.isArray(values) || !values.length) continue;
+      const labels = new Map();
+      for (const group of this.rules.catalogs[name] ?? []) {
+        for (const option of group.options) labels.set(String(option.value).toLowerCase(), option.label);
+      }
+      const named = values.map(value => labels.get(String(value).toLowerCase()) ?? value);
+      bits.push(named.slice(0, 2).join(", ") + (named.length > 2 ? ` +${named.length - 2}` : ""));
+    }
+    return bits.join(" · ");
+  }
+
+  /** The tab bar. Presets are GM-only, so players get two tabs, not three. */
+  _tabs() {
+    return [
+      {
+        id: "presets",
+        icon: "fas fa-wand-magic-sparkles",
+        label: game.i18n.localize(`${MODULE_ID}.presets.label`),
+        available: !this.readOnly
+      },
+      {
+        id: "restrictions",
+        icon: "fas fa-shield-halved",
+        label: game.i18n.localize(`${MODULE_ID}.configDialog.sections.restrictions`),
+        badge: "restrictions",
+        available: true
+      },
+      {
+        id: "properties",
+        icon: "fas fa-tags",
+        label: game.i18n.localize(`${MODULE_ID}.configDialog.sections.properties`),
+        badge: "properties",
+        available: true
+      }
+    ]
+      .filter(tab => tab.available)
+      .map(tab => ({ ...tab, active: tab.id === this.activeTab }));
+  }
+
   async _prepareContext(options) {
     const context = await super._prepareContext(options);
     const propertyGroups = this.rules.catalogs.requiredProperties;
@@ -118,11 +209,19 @@ class ContainerRulesApp extends ContainerRulesApplication {
       ...context,
       containerName: this.containerItem.name,
       readOnly: this.readOnly,
+      themeOptions: ["auto", "light", "dark"].map(value => ({
+        value,
+        icon: ContainerRulesApp.THEME_ICONS[value],
+        label: game.i18n.localize(`${MODULE_ID}.theme.${value}`),
+        active: this.theme === value
+      })),
       presets: this.readOnly ? [] : listRulePresets().map(preset => ({
         id: preset.id,
         icon: preset.icon,
-        label: game.i18n.localize(preset.label)
+        label: game.i18n.localize(preset.label),
+        summary: this._describePreset(preset.config)
       })),
+      tabs: this._tabs(),
       reductionPct: this.rules.reductionPct,
       previewUnit: preview.unit,
       previewIsActual: preview.actual,
@@ -170,14 +269,20 @@ class ContainerRulesApp extends ContainerRulesApplication {
     this.element.addEventListener("click", event => this._onLocalClick(event), { signal });
     this.element.addEventListener("input", event => this._onInput(event), { signal });
     this.element.addEventListener("keydown", event => this._onKeyDown(event), { signal });
-    this.element.querySelector(".cr-main")?.addEventListener("scroll", () => {
+    this.element.querySelector(".cr-panes")?.addEventListener("scroll", () => {
       this.multiselect.closeAll();
-      this._updateActiveSection();
     }, { signal, passive: true });
     document.addEventListener("pointerdown", event => {
       if (!this.element?.contains(event.target)) this.multiselect.closeAll();
     }, { signal });
-    window.addEventListener("resize", () => this.multiselect.closeAll(), { signal, passive: true });
+    window.addEventListener("resize", () => {
+      this.multiselect.closeAll();
+      this._positionTabMarker();
+    }, { signal, passive: true });
+
+    this.element.querySelector(".window-content")?.classList.add("anvil-ground");
+    this.applyAnvilTheme();
+    this._selectTab(this.activeTab, { focus: false });
 
     this._installDirtyIndicator();
     this._refreshAll();
@@ -186,18 +291,32 @@ class ContainerRulesApp extends ContainerRulesApplication {
       if (this.element !== renderedElement || !renderedElement.isConnected) return;
       renderedElement.classList.add("cr-ready");
       this._motionReady = true;
+      // The bar has its final width only after layout, so the marker is
+      // placed once more here rather than guessed during render.
+      this._positionTabMarker();
     });
   }
 
   _onPosition(position) {
     super._onPosition(position);
     this.multiselect.closeAll();
+    this._positionTabMarker();
   }
 
   async close(options = {}) {
     const force = typeof options === "boolean" ? options : options?.force;
     if (this._dirty && !force && !this._closingAfterSave) {
       const confirmed = await foundry.applications.api.DialogV2.confirm({
+        classes: ["anvil", "wc-confirm"],
+        render: (_event, dialog) => {
+          // Share the client preference with the module's secondary window.
+          dialog.applyAnvilTheme = () => {
+            const theme = this.theme;
+            if (theme === "light" || theme === "dark") dialog.element.dataset.avTheme = theme;
+            else delete dialog.element.dataset.avTheme;
+          };
+          dialog.applyAnvilTheme();
+        },
         window: { title: game.i18n.localize(`${MODULE_ID}.configDialog.unsaved.title`) },
         content: `<p>${escapeHtml(game.i18n.localize(`${MODULE_ID}.configDialog.unsaved.message`))}</p>`,
         yes: { label: game.i18n.localize(`${MODULE_ID}.configDialog.unsaved.discard`) },
@@ -243,21 +362,23 @@ class ContainerRulesApp extends ContainerRulesApplication {
     this.multiselect.resolvePropertyConflicts(target.dataset.keep);
   }
 
-  static _scrollSection(event, target) {
-    this._scrollToSection(target.dataset.section);
+  static _selectTabAction(event, target) {
+    this._selectTab(target.dataset.tab);
   }
 
   static _showUnavailable() {
     this.multiselect.showUnavailable();
   }
 
-  static _toggleSection(event, target) {
-    if (this.element.getBoundingClientRect().width >= 600) return;
-    target.closest(".cr-section")?.classList.toggle("is-collapsed");
-  }
-
   static _toggleSelect(event, target) {
     this.multiselect.toggle(target.dataset.selectName);
+  }
+
+  static async _setTheme(event, target) {
+    const theme = target.dataset.theme;
+    if (!["auto", "light", "dark"].includes(theme) || theme === this.theme) return;
+    await game.settings.set(MODULE_ID, "theme", theme);
+    this.applyAnvilTheme();
   }
 
   static _applyPreset(event, target) {
@@ -285,8 +406,11 @@ class ContainerRulesApp extends ContainerRulesApplication {
   _applyReadOnly() {
     if (!this.readOnly) return;
     this.element.classList.add("cr-readonly");
-    for (const control of this.element.querySelectorAll("input, button")) {
-      if (control.closest(".cr-nav")) continue;
+    // The tab bar, the theme switch and Close all stay live — a player still
+    // needs to read every pane and shut the window.
+    for (const control of this.element.querySelectorAll(
+      ".cr-hero input, .cr-panes input, .cr-panes button"
+    )) {
       control.disabled = true;
     }
     for (const combo of this.element.querySelectorAll(".cr-combobox")) {
@@ -475,37 +599,52 @@ class ContainerRulesApp extends ContainerRulesApplication {
     }
   }
 
-  _scrollToSection(name) {
-    const main = this.element.querySelector(".cr-main");
-    const section = this.element.querySelector(`[data-section="${name}"]`);
-    if (!main || !section) return;
-    section.classList.remove("is-collapsed");
-    const top = section.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop - 16;
-    main.scrollTo({
-      top: Math.max(0, top),
-      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"
-    });
-    section.querySelector("input, .cr-combobox")?.focus({ preventScroll: true });
+  /**
+   * Show one pane and move the tab marker to it.
+   *
+   * The marker is a single element translated across the bar rather than a
+   * border on each tab, so the indicator slides on the compositor instead of
+   * repainting three buttons.
+   */
+  _selectTab(name, { focus = true } = {}) {
+    const panes = Array.from(this.element.querySelectorAll(".cr-pane"));
+    const tabs = Array.from(this.element.querySelectorAll(".cr-tab"));
+    if (!panes.length) return;
+
+    const target = panes.some(pane => pane.dataset.tab === name)
+      ? name
+      : panes[0].dataset.tab;
+    this.activeTab = target;
+
+    for (const pane of panes) pane.classList.toggle("is-active", pane.dataset.tab === target);
+    for (const tab of tabs) {
+      const active = tab.dataset.tab === target;
+      tab.classList.toggle("is-active", active);
+      tab.setAttribute("aria-selected", String(active));
+      tab.tabIndex = active ? 0 : -1;
+    }
+
+    this.multiselect.closeAll();
+    this._positionTabMarker();
+    const pane = panes.find(entry => entry.dataset.tab === target);
+    if (focus) pane?.querySelector("input, .cr-combobox, button")?.focus({ preventScroll: true });
   }
 
-  _updateActiveSection() {
-    const main = this.element.querySelector(".cr-main");
-    if (!main) return;
-    const sections = Array.from(main.querySelectorAll(".cr-section"));
-    const mainTop = main.getBoundingClientRect().top;
-    const active = sections.reduce((current, section) => (
-      section.getBoundingClientRect().top - mainTop <= 90 ? section : current
-    ), sections[0]);
-    for (const nav of this.element.querySelectorAll(".cr-nav-button")) {
-      nav.classList.toggle("is-active", nav.dataset.section === active?.dataset.section);
-    }
+  _positionTabMarker() {
+    const marker = this.element.querySelector(".cr-tab-marker");
+    const active = this.element.querySelector(".cr-tab.is-active");
+    if (!marker || !active) return;
+    const bar = active.parentElement.getBoundingClientRect();
+    const rect = active.getBoundingClientRect();
+    marker.style.setProperty("--cr-marker-x", `${rect.left - bar.left}px`);
+    marker.style.setProperty("--cr-marker-w", `${rect.width}px`);
   }
 
   async _save() {
     if (this.readOnly) return;
     this._refreshPropertyConflicts();
     if (this._hasErrors) {
-      this._scrollToSection("properties");
+      this._selectTab("properties");
       this.multiselect.root("requiredProperties")?.querySelector(".cr-combobox")?.focus();
       return;
     }

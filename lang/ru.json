@@ -124,5 +124,11 @@
   "weighty-containers.presets.weaponRack": "Оружейная стойка",
   "weighty-containers.presets.mundaneOnly": "Без магии",
   "weighty-containers.presets.clear": "Сбросить всё",
-  "weighty-containers.configBtn.view": "Посмотреть правила контейнера"
+  "weighty-containers.configBtn.view": "Посмотреть правила контейнера",
+  "weighty-containers.theme.name": "Тема окон",
+  "weighty-containers.theme.hint": "Тема для окон этого модуля. «Авто» следует за Foundry, а та — за системой.",
+  "weighty-containers.theme.label": "Тема",
+  "weighty-containers.theme.auto": "Авто",
+  "weighty-containers.theme.light": "Светлая",
+  "weighty-containers.theme.dark": "Тёмная"
 }

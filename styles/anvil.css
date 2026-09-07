@@ -1,0 +1,464 @@
+/* ============================================================
+   ANVIL — a parametric design system for Foundry VTT modules
+   ------------------------------------------------------------
+   Built on the Material 3 role model — tonal surfaces, colour
+   roles, state layers — with iOS-style translucency and spring
+   motion over it.
+
+   The whole system is driven by the PARAMETERS block below.
+   Every colour derives from one hue and one chroma multiplier in
+   OKLCH; every radius from one base radius; every gap from one
+   density factor; every duration from one motion factor.
+
+   Retuning this for another module means editing that block. It
+   does not mean rewriting rules.
+
+   Requires Chromium 123+ (light-dark, oklch). Foundry v13+ ships
+   newer, as does any current browser.
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   0. PARAMETERS — the only part you edit per module
+   ------------------------------------------------------------ */
+
+.anvil {
+  /* --- identity ------------------------------------------------
+     Hue is an OKLCH angle:
+       25 red · 72 amber · 110 lime · 152 green
+       200 cyan · 255 blue · 300 violet · 340 pink
+     Chroma multiplies the saturation of every colour at once:
+       0 gives a greyscale system, 1.4 is about as loud as stays
+       readable against the neutral surfaces.                    */
+  --p-hue: 72;
+  --p-chroma: .82;
+
+  /* Hues for the two supporting roles. Keep them well apart from
+     the primary or the roles stop reading as different roles.   */
+  --p-hue-secondary: 232;
+  --p-hue-tertiary: 152;
+
+  /* --- shape ---------------------------------------------------
+     One base radius; everything else is a ratio of it, so shapes
+     stay in proportion when the system gets rounder or sharper.
+     ~12px reads as Material, ~20px and up reads as iOS.         */
+  --p-radius: 14px;
+
+  /* --- density -------------------------------------------------
+     Multiplies the whole spacing scale. .85 for a dense data
+     window, 1.15 for a roomy settings panel.                    */
+  --p-density: 1;
+
+  /* --- motion --------------------------------------------------
+     Multiplies every duration. Not the way to switch motion off —
+     prefers-reduced-motion already does that properly.          */
+  --p-motion: 1;
+
+  /* --- depth ---------------------------------------------------
+     Scales shadow strength. Material leans on tone rather than
+     shadow, so this stays low; raise it for windows that need to
+     float clearly above a busy canvas.                          */
+  --p-elevation: 1;
+
+  /* --- state layers --------------------------------------------
+     Material's interaction model: a translucent wash of the accent
+     over a component, instead of a different background colour per
+     state. These three numbers are the entire interaction feel.  */
+  --p-state-hover: .09;
+  --p-state-focus: .12;
+  --p-state-press: .16;
+
+  /* --- type ----------------------------------------------------
+     One base size and one ratio generate the scale.             */
+  --p-text-base: 14px;
+  --p-text-ratio: 1.15;
+
+  --p-font-display: "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  --p-font-ui: "Segoe UI", system-ui, sans-serif;
+  --p-font-num: var(--p-font-ui);
+  --a-control-height: 36px;
+  --a-edge: light-dark(rgb(255 255 255 / .8), rgb(255 255 255 / .08));
+
+  /* --- translucency --------------------------------------------
+     iOS-style material. --p-veil is the opacity of a floating
+     panel over whatever is behind it.
+
+     Legibility sets the floor here, not taste: a panel carrying
+     dense text over a busy window needs ~.9 or the content behind
+     it reads straight through the options. Drop towards .8 only
+     for panels that are mostly chrome. --p-blur: 0 gives flat
+     opaque panels, --p-veil: 1 drops translucency entirely.    */
+  --p-blur: 24px;
+  --p-veil: .93;
+}
+
+/* ------------------------------------------------------------
+   1. THEME
+
+   Every colour is declared once with light-dark(). Which half
+   applies is decided by one property, color-scheme. There is no
+   second palette, so light and dark cannot drift apart.
+
+   Priority, lowest to highest:
+     operating system      color-scheme: light dark
+     Foundry's theme       body.theme-light / body.theme-dark
+     module override       [data-av-theme] on the window root
+
+   The override is an attribute on the element itself, so it beats
+   the body class whichever way that class points.
+   ------------------------------------------------------------ */
+
+.anvil { color-scheme: light dark; }
+
+body.theme-light .anvil:not([data-av-theme="dark"]),
+.anvil[data-av-theme="light"] { color-scheme: light; }
+
+body.theme-dark .anvil:not([data-av-theme="light"]),
+.anvil[data-av-theme="dark"] { color-scheme: dark; }
+
+/* ------------------------------------------------------------
+   2. COLOUR ROLES
+
+   Material's role model. Components reference roles, never
+   values, which is what lets one component work in any palette.
+
+   Every value here is computed from the parameters above.
+   ------------------------------------------------------------ */
+
+.anvil {
+  /* --- primary: the one colour that asks for action --- */
+  --a-primary: light-dark(
+    oklch(56% calc(.155 * var(--p-chroma)) var(--p-hue)),
+    oklch(84% calc(.155 * var(--p-chroma)) var(--p-hue))
+  );
+  --a-on-primary: light-dark(
+    oklch(100% 0 var(--p-hue)),
+    oklch(26% calc(.09 * var(--p-chroma)) var(--p-hue))
+  );
+  --a-primary-container: light-dark(
+    oklch(92% calc(.09 * var(--p-chroma)) var(--p-hue)),
+    oklch(38% calc(.10 * var(--p-chroma)) var(--p-hue))
+  );
+  --a-on-primary-container: light-dark(
+    oklch(34% calc(.11 * var(--p-chroma)) var(--p-hue)),
+    oklch(94% calc(.07 * var(--p-chroma)) var(--p-hue))
+  );
+
+  /* --- secondary: informational, never a call to action --- */
+  --a-secondary: light-dark(
+    oklch(52% calc(.13 * var(--p-chroma)) var(--p-hue-secondary)),
+    oklch(82% calc(.12 * var(--p-chroma)) var(--p-hue-secondary))
+  );
+  --a-secondary-container: light-dark(
+    oklch(93% calc(.06 * var(--p-chroma)) var(--p-hue-secondary)),
+    oklch(36% calc(.09 * var(--p-chroma)) var(--p-hue-secondary))
+  );
+  --a-on-secondary-container: light-dark(
+    oklch(32% calc(.09 * var(--p-chroma)) var(--p-hue-secondary)),
+    oklch(94% calc(.05 * var(--p-chroma)) var(--p-hue-secondary))
+  );
+
+  /* --- tertiary: positive outcomes --- */
+  --a-tertiary: light-dark(
+    oklch(50% calc(.14 * var(--p-chroma)) var(--p-hue-tertiary)),
+    oklch(82% calc(.15 * var(--p-chroma)) var(--p-hue-tertiary))
+  );
+  --a-tertiary-container: light-dark(
+    oklch(92% calc(.08 * var(--p-chroma)) var(--p-hue-tertiary)),
+    oklch(34% calc(.10 * var(--p-chroma)) var(--p-hue-tertiary))
+  );
+  --a-on-tertiary-container: light-dark(
+    oklch(30% calc(.10 * var(--p-chroma)) var(--p-hue-tertiary)),
+    oklch(94% calc(.07 * var(--p-chroma)) var(--p-hue-tertiary))
+  );
+
+  /* --- error --- */
+  --a-error: light-dark(
+    oklch(52% calc(.19 * var(--p-chroma)) 22),
+    oklch(80% calc(.14 * var(--p-chroma)) 22)
+  );
+  --a-error-container: light-dark(
+    oklch(94% calc(.05 * var(--p-chroma)) 22),
+    oklch(36% calc(.12 * var(--p-chroma)) 22)
+  );
+  --a-on-error-container: light-dark(
+    oklch(34% calc(.13 * var(--p-chroma)) 22),
+    oklch(94% calc(.05 * var(--p-chroma)) 22)
+  );
+
+  /* --- surfaces ---
+     A tonal ladder, not a stack of shadows: depth is expressed by
+     tone first and only confirmed by shadow. The neutral carries a
+     trace of the primary hue, so nothing reads as a grey pasted
+     onto a coloured page. */
+  --a-surface: light-dark(
+    oklch(98.6% calc(.006 * var(--p-chroma)) var(--p-hue)),
+    oklch(20% calc(.006 * var(--p-chroma)) var(--p-hue))
+  );
+  --a-surface-lowest: light-dark(
+    oklch(100% 0 var(--p-hue)),
+    oklch(12% calc(.014 * var(--p-chroma)) var(--p-hue))
+  );
+  --a-surface-low: light-dark(
+    oklch(96.5% calc(.009 * var(--p-chroma)) var(--p-hue)),
+    oklch(23% calc(.007 * var(--p-chroma)) var(--p-hue))
+  );
+  --a-surface-high: light-dark(
+    oklch(94% calc(.013 * var(--p-chroma)) var(--p-hue)),
+    oklch(27% calc(.008 * var(--p-chroma)) var(--p-hue))
+  );
+  --a-surface-highest: light-dark(
+    oklch(91.5% calc(.017 * var(--p-chroma)) var(--p-hue)),
+    oklch(31% calc(.009 * var(--p-chroma)) var(--p-hue))
+  );
+
+  --a-on-surface: light-dark(
+    oklch(22% calc(.02 * var(--p-chroma)) var(--p-hue)),
+    oklch(95% calc(.012 * var(--p-chroma)) var(--p-hue))
+  );
+  --a-on-surface-variant: light-dark(
+    oklch(48% calc(.026 * var(--p-chroma)) var(--p-hue)),
+    oklch(77% calc(.018 * var(--p-chroma)) var(--p-hue))
+  );
+
+  --a-outline: light-dark(
+    oklch(60% calc(.02 * var(--p-chroma)) var(--p-hue)),
+    oklch(56% calc(.02 * var(--p-chroma)) var(--p-hue))
+  );
+  --a-outline-variant: light-dark(
+    oklch(88% calc(.014 * var(--p-chroma)) var(--p-hue)),
+    oklch(32% calc(.018 * var(--p-chroma)) var(--p-hue))
+  );
+
+  /* --- state layers ---
+     An accent mixed into whatever sits underneath, at a fixed
+     opacity. Applied through a pseudo-element so it composites
+     over a component's own background instead of replacing it. */
+  --a-state-hover: color-mix(in oklab, var(--a-primary) calc(var(--p-state-hover) * 100%), transparent);
+  --a-state-focus: color-mix(in oklab, var(--a-primary) calc(var(--p-state-focus) * 100%), transparent);
+  --a-state-press: color-mix(in oklab, var(--a-primary) calc(var(--p-state-press) * 100%), transparent);
+
+  /* --- scrim and material --- */
+  --a-scrim: light-dark(oklch(20% .02 var(--p-hue) / 34%), oklch(0% 0 0 / 54%));
+  --a-material: color-mix(in oklab, var(--a-surface-low) calc(var(--p-veil) * 100%), transparent);
+}
+
+/* ------------------------------------------------------------
+   3. SHAPE · SPACE · TYPE · MOTION · DEPTH · LAYERS
+   ------------------------------------------------------------ */
+
+.anvil {
+  /* --- shape: ratios of --p-radius --- */
+  --a-shape-xs: calc(var(--p-radius) * .28);
+  --a-shape-sm: calc(var(--p-radius) * .5);
+  --a-shape-md: calc(var(--p-radius) * .78);
+  --a-shape-lg: var(--p-radius);
+  --a-shape-xl: calc(var(--p-radius) * 1.55);
+  --a-shape-full: 999px;
+
+  /* --- space: 4px steps, scaled by density --- */
+  --a-space-1: calc(2px * var(--p-density));
+  --a-space-2: calc(4px * var(--p-density));
+  --a-space-3: calc(6px * var(--p-density));
+  --a-space-4: calc(8px * var(--p-density));
+  --a-space-5: calc(12px * var(--p-density));
+  --a-space-6: calc(16px * var(--p-density));
+  --a-space-7: calc(20px * var(--p-density));
+  --a-space-8: calc(24px * var(--p-density));
+  --a-space-9: calc(32px * var(--p-density));
+  --a-space-10: calc(40px * var(--p-density));
+
+  /* --- type: a geometric scale off one base and one ratio --- */
+  --a-text-xs: calc(var(--p-text-base) / var(--p-text-ratio) / var(--p-text-ratio));
+  --a-text-sm: calc(var(--p-text-base) / var(--p-text-ratio));
+  --a-text-md: var(--p-text-base);
+  --a-text-lg: calc(var(--p-text-base) * var(--p-text-ratio));
+  --a-text-xl: calc(var(--a-text-lg) * var(--p-text-ratio));
+  --a-text-2xl: calc(var(--a-text-xl) * var(--p-text-ratio) * var(--p-text-ratio));
+  --a-text-3xl: calc(var(--a-text-2xl) * var(--p-text-ratio) * var(--p-text-ratio));
+
+  --a-weight-regular: 400;
+  --a-weight-medium: 500;
+  --a-weight-semibold: 600;
+  --a-weight-bold: 700;
+
+  --a-leading-tight: 1.12;
+  --a-leading-snug: 1.35;
+  --a-leading-normal: 1.55;
+
+  /* Large text sits loose at default tracking; small caps sit
+     cramped without extra. These point in opposite directions. */
+  --a-track-display: -.022em;
+  --a-track-label: .09em;
+
+  /* --- motion ---
+     Material's emphasized curve for state changes, a real spring
+     for anything that should feel physical. */
+  --a-dur-instant: calc(70ms * var(--p-motion));
+  --a-dur-short: calc(140ms * var(--p-motion));
+  --a-dur-medium: calc(220ms * var(--p-motion));
+  --a-dur-long: calc(360ms * var(--p-motion));
+  --a-dur-window: calc(480ms * var(--p-motion));
+
+  --a-ease: cubic-bezier(.2, 0, 0, 1);
+  --a-ease-decel: cubic-bezier(.05, .7, .1, 1);
+  --a-ease-accel: cubic-bezier(.3, 0, .8, .15);
+  --a-spring: linear(
+    0, .036 2.2%, .143 4.6%, .553 12.3%, .776 17.1%, .876 20.2%,
+    .956 23.7%, 1.014 27.8%, 1.043 32.5%, 1.045 38%, 1.026 47.4%,
+    .998 60.3%, .995 71.4%, 1
+  );
+
+  --a-stagger: calc(48ms * var(--p-motion));
+
+  /* --- depth: tone first, shadow only to confirm --- */
+  --a-shadow-1: 0 1px 2px
+    light-dark(oklch(20% .02 var(--p-hue) / calc(9% * var(--p-elevation))),
+               oklch(0% 0 0 / calc(30% * var(--p-elevation))));
+  --a-shadow-2: 0 4px 12px -3px
+    light-dark(oklch(20% .02 var(--p-hue) / calc(13% * var(--p-elevation))),
+               oklch(0% 0 0 / calc(42% * var(--p-elevation))));
+  --a-shadow-3: 0 16px 40px -10px
+    light-dark(oklch(20% .02 var(--p-hue) / calc(24% * var(--p-elevation))),
+               oklch(0% 0 0 / calc(58% * var(--p-elevation))));
+
+  --a-focus-ring:
+    0 0 0 2px var(--a-surface),
+    0 0 0 4px var(--a-primary);
+
+  /* --- layers: named stops, so nobody writes z-index: 9999 --- */
+  --a-z-base: 0;
+  --a-z-raised: 10;
+  --a-z-sticky: 20;
+  --a-z-scrim: 30;
+  --a-z-popover: 40;
+  --a-z-toast: 50;
+
+  color: var(--a-on-surface);
+  font-family: var(--p-font-ui);
+  font-size: var(--a-text-md);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------
+   4. SURFACES
+   ------------------------------------------------------------ */
+
+.anvil-ground {
+  background:
+    radial-gradient(115% 75% at 10% -10%,
+      color-mix(in oklab, var(--a-primary) 5%, transparent), transparent 55%),
+    var(--a-surface);
+  position: relative;
+}
+
+/* iOS-style material: translucent, blurred, and carrying the 1px
+   inner highlight that makes an edge read as glass rather than as
+   a blurred rectangle. */
+.anvil-material {
+  background: var(--a-material);
+  border: 1px solid var(--a-outline-variant);
+  box-shadow:
+    var(--a-shadow-3),
+    inset 0 1px 0 light-dark(oklch(100% 0 0 / 75%), oklch(100% 0 0 / 9%));
+}
+
+@supports (backdrop-filter: blur(1px)) {
+  .anvil-material {
+    backdrop-filter: blur(var(--p-blur)) saturate(1.7);
+  }
+}
+
+.anvil-scroll {
+  scrollbar-color: var(--a-outline-variant) transparent;
+  scrollbar-width: thin;
+}
+
+.anvil-scroll::-webkit-scrollbar { height: 10px; width: 10px; }
+
+.anvil-scroll::-webkit-scrollbar-thumb {
+  background-clip: content-box;
+  background-color: var(--a-outline-variant);
+  border: 3px solid transparent;
+  border-radius: var(--a-shape-full);
+}
+
+.anvil-scroll::-webkit-scrollbar-thumb:hover { background-color: var(--a-primary); }
+.anvil-scroll::-webkit-scrollbar-track { background: transparent; }
+
+/* ------------------------------------------------------------
+   5. INTERACTION
+
+   One state-layer recipe for every clickable thing in the system.
+   ------------------------------------------------------------ */
+
+.anvil-interactive {
+  isolation: isolate;
+  position: relative;
+}
+
+.anvil-interactive::after {
+  background: transparent;
+  border-radius: inherit;
+  content: "";
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  transition: background var(--a-dur-short) var(--a-ease);
+  z-index: 1;
+}
+
+.anvil-interactive:hover::after { background: var(--a-state-hover); }
+.anvil-interactive:active::after { background: var(--a-state-press); }
+
+.anvil :focus-visible {
+  box-shadow: var(--a-focus-ring);
+  outline: none;
+}
+
+/* ------------------------------------------------------------
+   6. MOTION LIBRARY
+   Transform and opacity only — never layout properties.
+   ------------------------------------------------------------ */
+
+@keyframes a-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes a-pop {
+  from { opacity: 0; transform: scale(.94); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes a-drop {
+  from { opacity: 0; transform: translateY(-8px) scale(.985); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes a-slide {
+  from { opacity: 0; transform: translateX(10px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes a-sheen {
+  from { transform: translateX(-130%) skewX(-14deg); }
+  to   { transform: translateX(240%) skewX(-14deg); }
+}
+
+/* ------------------------------------------------------------
+   7. REDUCED MOTION — honoured completely, not partially
+   ------------------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+  .anvil,
+  .anvil *,
+  .anvil *::before,
+  .anvil *::after {
+    animation-delay: 0ms !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+    transition-delay: 0ms !important;
+  }
+}

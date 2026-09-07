@@ -124,5 +124,11 @@
   "weighty-containers.presets.weaponRack": "Weapon rack",
   "weighty-containers.presets.mundaneOnly": "No magic items",
   "weighty-containers.presets.clear": "Clear all",
-  "weighty-containers.configBtn.view": "View container rules"
+  "weighty-containers.configBtn.view": "View container rules",
+  "weighty-containers.theme.name": "Window theme",
+  "weighty-containers.theme.hint": "Theme for this module’s own windows. Auto follows Foundry, which can in turn follow your operating system.",
+  "weighty-containers.theme.label": "Theme",
+  "weighty-containers.theme.auto": "Auto",
+  "weighty-containers.theme.light": "Light",
+  "weighty-containers.theme.dark": "Dark"
 }

@@ -287,7 +287,7 @@ export function renderRuleMultiselect({ name, groups, selectedValues, placeholde
             <span class="cr-select-total" data-select-total></span>
           </div>
         </div>
-        <div class="cr-options">${groupMarkup}</div>
+        <div class="cr-options anvil-scroll">${groupMarkup}</div>
         <div class="cr-select-result" data-select-result></div>
       </div>
     </div>`;

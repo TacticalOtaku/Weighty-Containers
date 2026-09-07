@@ -1,0 +1,516 @@
+<!doctype html><html lang="ru"><meta charset="utf-8"><title>Anvil — visual fixture</title>
+<link rel="stylesheet" href="file:///D:/Foundry/Foundry%20Virtual%20Tabletop/resources/app/public/css/foundry2.css">
+<link rel="stylesheet" href="file:///D:/Foundry/Foundry%20Virtual%20Tabletop/resources/app/public/fonts/fontawesome/css/all.min.css">
+<link rel="stylesheet" href="file:///D:/MyAiProjects/Foundry%20Modules/weighty-containers/styles/anvil.css">
+<link rel="stylesheet" href="file:///D:/MyAiProjects/Foundry%20Modules/weighty-containers/styles/container-rules.css">
+<style>body{margin:0;background:#77736d;display:grid;place-items:center;height:100vh} .application.container-rules{position:relative;inset:auto;width:880px;height:720px} .cr-pane[data-tab=presets]{display:grid} .window-content{flex:1;min-height:0} </style>
+<body class="theme-dark"><form class="application container-rules anvil cr-ready">
+<header class="window-header"><i class="fas fa-box-open"></i><h1 class="window-title">Правила контейнера</h1><button type="button" class="header-control" aria-label="Закрыть">×</button></header>
+<div class="window-content anvil-ground">
+<div class="cr-shell">
+
+  <header class="cr-hero">
+    <div class="cr-hero-id">
+      <span class="cr-hero-icon" aria-hidden="true"><i class="fas fa-box-open"></i></span>
+      <span class="cr-hero-copy">
+        <small>Контейнер</small>
+        <strong title="Походная сумка следопыта">Походная сумка следопыта</strong>
+      </span>
+    </div>
+
+    <div class="cr-dial">
+      <div class="cr-dial-head">
+        <span class="cr-dial-label">Снижение (%)</span>
+        <label class="cr-dial-value">
+          <input type="number" name="reductionPct" value="50"
+                 min="0" max="100" step="1"
+                 aria-label="Снижение (%)">
+          <span aria-hidden="true">%</span>
+        </label>
+      </div>
+      <input type="range" name="reductionRange" value="50" min="0" max="100" step="1"
+             aria-label="Снижение (%)">
+      <div class="cr-dial-scale" aria-hidden="true"><span>0</span><span>50</span><span>100</span></div>
+    </div>
+
+    <div class="cr-readout" aria-live="polite">
+      <small>
+        <i class="fas fa-scale-balanced" aria-hidden="true"></i>
+          Текущее содержимое
+      </small>
+      <strong>
+        <span class="cr-readout-before">24</span>
+        <i class="fas fa-arrow-right-long" aria-hidden="true"></i>
+        <b data-preview-after>12</b>
+        <em>фнт</em>
+      </strong>
+    </div>
+  </header>
+
+
+  <nav class="cr-tabs" role="tablist"
+       aria-label="Разделы правила">
+    <button type="button" class="cr-tab is-active"
+            role="tab" id="cr-tab-presets"
+            aria-selected="true" aria-controls="cr-pane-presets"
+            data-action="selectTab" data-tab="presets">
+      <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i>
+      <span>Пресеты</span>
+    </button>
+    <button type="button" class="cr-tab"
+            role="tab" id="cr-tab-restrictions"
+            aria-selected="" aria-controls="cr-pane-restrictions"
+            data-action="selectTab" data-tab="restrictions">
+      <i class="fas fa-box-open" aria-hidden="true"></i>
+      <span>Содержимое</span>
+    </button>
+    <button type="button" class="cr-tab"
+            role="tab" id="cr-tab-properties"
+            aria-selected="" aria-controls="cr-pane-properties"
+            data-action="selectTab" data-tab="properties">
+      <i class="fas fa-sliders" aria-hidden="true"></i>
+      <span>Свойства</span>
+    </button>
+    <span class="cr-tab-marker" aria-hidden="true"></span>
+  </nav>
+
+  <div class="cr-panes anvil-scroll">
+
+    <section class="cr-pane" data-tab="presets" role="tabpanel"
+             aria-labelledby="cr-tab-presets" tabindex="0">
+      <p class="cr-pane-lede">Пресет меняет только те настройки, которых касается. Другие модули могут добавлять свои.</p>
+      <div class="cr-preset-grid">
+        <button type="button" class="cr-preset anvil-interactive"
+                data-action="applyPreset" data-preset-id="wc.bagOfHolding">
+          <span class="cr-preset-icon" aria-hidden="true"><i class="fas fa-hat-wizard"></i></span>
+          <span class="cr-preset-copy">
+            <span class="cr-preset-label">Сумка хранения</span>
+            <small class="cr-preset-summary">Снижение веса: 100%</small>
+          </span>
+        </button>
+        <button type="button" class="cr-preset anvil-interactive"
+                data-action="applyPreset" data-preset-id="wc.reducingBag">
+          <span class="cr-preset-icon" aria-hidden="true"><i class="fas fa-feather"></i></span>
+          <span class="cr-preset-copy">
+            <span class="cr-preset-label">Вес вдвое</span>
+            <small class="cr-preset-summary">Снижение веса: 50%</small>
+          </span>
+        </button>
+        <button type="button" class="cr-preset anvil-interactive"
+                data-action="applyPreset" data-preset-id="wc.quiver">
+          <span class="cr-preset-icon" aria-hidden="true"><i class="fas fa-arrow-right"></i></span>
+          <span class="cr-preset-copy">
+            <span class="cr-preset-label">Колчан</span>
+            <small class="cr-preset-summary">Ограничения содержимого</small>
+          </span>
+        </button>
+        <button type="button" class="cr-preset anvil-interactive"
+                data-action="applyPreset" data-preset-id="wc.potionBelt">
+          <span class="cr-preset-icon" aria-hidden="true"><i class="fas fa-flask"></i></span>
+          <span class="cr-preset-copy">
+            <span class="cr-preset-label">Пояс зелий</span>
+            <small class="cr-preset-summary">Ограничения содержимого</small>
+          </span>
+        </button>
+        <button type="button" class="cr-preset anvil-interactive"
+                data-action="applyPreset" data-preset-id="wc.weaponRack">
+          <span class="cr-preset-icon" aria-hidden="true"><i class="fas fa-khanda"></i></span>
+          <span class="cr-preset-copy">
+            <span class="cr-preset-label">Оружейная стойка</span>
+            <small class="cr-preset-summary">Ограничения содержимого</small>
+          </span>
+        </button>
+        <button type="button" class="cr-preset anvil-interactive"
+                data-action="applyPreset" data-preset-id="wc.mundaneOnly">
+          <span class="cr-preset-icon" aria-hidden="true"><i class="fas fa-ban"></i></span>
+          <span class="cr-preset-copy">
+            <span class="cr-preset-label">Без магии</span>
+            <small class="cr-preset-summary">Ограничения содержимого</small>
+          </span>
+        </button>
+        <button type="button" class="cr-preset anvil-interactive"
+                data-action="applyPreset" data-preset-id="wc.clear">
+          <span class="cr-preset-icon" aria-hidden="true"><i class="fas fa-eraser"></i></span>
+          <span class="cr-preset-copy">
+            <span class="cr-preset-label">Сбросить всё</span>
+            <small class="cr-preset-summary">Снижение веса: 0%</small>
+          </span>
+        </button>
+      </div>
+    </section>
+
+    <section class="cr-pane" data-tab="restrictions" role="tabpanel"
+             aria-labelledby="cr-tab-restrictions" tabindex="0">
+      <div class="cr-field">
+        <div class="cr-field-label">
+          Разрешённые типы предметов
+        </div>
+        
+    <div class="cr-multiselect" data-select="allowedTypes" data-placeholder="Без ограничений">
+      <div class="cr-combobox" role="combobox" tabindex="0" aria-haspopup="listbox"
+           aria-expanded="false" aria-controls="wc-allowedTypes-options">
+        <div class="cr-selection" data-selection></div>
+        <button type="button" class="cr-icon-button cr-select-clear" data-action="clearSelect"
+                data-select-name="allowedTypes" aria-label="Очистить"
+                title="Очистить">
+          <i class="fas fa-xmark"></i>
+        </button>
+        <button type="button" class="cr-icon-button cr-select-toggle" data-action="toggleSelect"
+                data-select-name="allowedTypes" aria-label="Открыть список">
+          <i class="fas fa-chevron-down"></i>
+        </button>
+      </div>
+      <div id="wc-allowedTypes-options" class="cr-select-panel" role="listbox" aria-multiselectable="true"
+           popover="manual" hidden>
+        <div class="cr-select-toolbar">
+          <label class="cr-search">
+            <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+            <input type="search" data-select-search autocomplete="off"
+                   placeholder="Поиск...">
+          </label>
+          <div class="cr-select-actions">
+            <button type="button" data-action="selectVisible" data-select-name="allowedTypes">
+              Выбрать видимые
+            </button>
+            <button type="button" data-action="deselectVisible" data-select-name="allowedTypes">
+              Снять видимые
+            </button>
+            <button type="button" data-action="clearSelect" data-select-name="allowedTypes">
+              Очистить
+            </button>
+            <span class="cr-select-total" data-select-total></span>
+          </div>
+        </div>
+        <div class="cr-options anvil-scroll">
+      <section class="cr-option-group" data-group="items"
+               data-types="">
+        <label class="cr-option-group-header">
+          <input type="checkbox" data-group-toggle="true">
+          <span class="cr-checkbox-mark" aria-hidden="true"><i class="fas fa-check"></i></span>
+          <span>Предметы</span>
+          <span class="cr-group-count" aria-hidden="true"></span>
+        </label>
+        <div class="cr-option-group-items">
+        <label class="cr-option-row" data-search="оружие weapon">
+          <input type="checkbox" name="allowedTypes" value="weapon"
+                 data-label="Оружие">
+          <span class="cr-checkbox-mark" aria-hidden="true"><i class="fas fa-check"></i></span>
+          <span class="cr-option-label">Оружие</span>
+        </label>
+        <label class="cr-option-row" data-search="снаряжение equipment">
+          <input type="checkbox" name="allowedTypes" value="equipment"
+                 data-label="Снаряжение">
+          <span class="cr-checkbox-mark" aria-hidden="true"><i class="fas fa-check"></i></span>
+          <span class="cr-option-label">Снаряжение</span>
+        </label></div>
+      </section></div>
+        <div class="cr-select-result" data-select-result></div>
+      </div>
+    </div>
+        <p class="cr-hint">Пустой выбор разрешает любые типы предметов.</p>
+      </div>
+
+      <div class="cr-field">
+        <div class="cr-field-label">
+          Разрешённые категории/подтипы
+        </div>
+        
+    <div class="cr-multiselect" data-select="allowedSubtypes" data-placeholder="Без ограничений">
+      <div class="cr-combobox" role="combobox" tabindex="0" aria-haspopup="listbox"
+           aria-expanded="false" aria-controls="wc-allowedSubtypes-options">
+        <div class="cr-selection" data-selection></div>
+        <button type="button" class="cr-icon-button cr-select-clear" data-action="clearSelect"
+                data-select-name="allowedSubtypes" aria-label="Очистить"
+                title="Очистить">
+          <i class="fas fa-xmark"></i>
+        </button>
+        <button type="button" class="cr-icon-button cr-select-toggle" data-action="toggleSelect"
+                data-select-name="allowedSubtypes" aria-label="Открыть список">
+          <i class="fas fa-chevron-down"></i>
+        </button>
+      </div>
+      <div id="wc-allowedSubtypes-options" class="cr-select-panel" role="listbox" aria-multiselectable="true"
+           popover="manual" hidden>
+        <div class="cr-select-toolbar">
+          <label class="cr-search">
+            <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+            <input type="search" data-select-search autocomplete="off"
+                   placeholder="Поиск...">
+          </label>
+          <div class="cr-select-actions">
+            <button type="button" data-action="selectVisible" data-select-name="allowedSubtypes">
+              Выбрать видимые
+            </button>
+            <button type="button" data-action="deselectVisible" data-select-name="allowedSubtypes">
+              Снять видимые
+            </button>
+            <button type="button" data-action="clearSelect" data-select-name="allowedSubtypes">
+              Очистить
+            </button>
+            <span class="cr-select-total" data-select-total></span>
+          </div>
+        </div>
+        <div class="cr-options anvil-scroll">
+      <section class="cr-option-group" data-group="items"
+               data-types="">
+        <label class="cr-option-group-header">
+          <input type="checkbox" data-group-toggle="true">
+          <span class="cr-checkbox-mark" aria-hidden="true"><i class="fas fa-check"></i></span>
+          <span>Предметы</span>
+          <span class="cr-group-count" aria-hidden="true"></span>
+        </label>
+        <div class="cr-option-group-items">
+        <label class="cr-option-row" data-search="оружие weapon">
+          <input type="checkbox" name="allowedSubtypes" value="weapon"
+                 data-label="Оружие">
+          <span class="cr-checkbox-mark" aria-hidden="true"><i class="fas fa-check"></i></span>
+          <span class="cr-option-label">Оружие</span>
+        </label>
+        <label class="cr-option-row" data-search="снаряжение equipment">
+          <input type="checkbox" name="allowedSubtypes" value="equipment"
+                 data-label="Снаряжение">
+          <span class="cr-checkbox-mark" aria-hidden="true"><i class="fas fa-check"></i></span>
+          <span class="cr-option-label">Снаряжение</span>
+        </label></div>
+      </section></div>
+        <div class="cr-select-result" data-select-result></div>
+      </div>
+    </div>
+        <p class="cr-hint">Доступные категории зависят от выбранных типов предметов.</p>
+        <div class="cr-notice cr-notice-warn" data-subtype-warning hidden>
+          <i class="fas fa-triangle-exclamation" aria-hidden="true"></i>
+          <span data-warning-text></span>
+          <span class="cr-notice-actions">
+            <button type="button" data-action="showUnavailable">
+              Показать
+            </button>
+            <button type="button" data-action="removeUnavailable">
+              Удалить недоступные
+            </button>
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <section class="cr-pane" data-tab="properties" role="tabpanel"
+             aria-labelledby="cr-tab-properties" tabindex="0">
+      <div class="cr-duo">
+        <div class="cr-field cr-field-positive">
+          <div class="cr-field-label">
+            <span class="cr-field-mark" aria-hidden="true"><i class="fas fa-circle-check"></i></span>
+            Обязательные свойства
+            <span class="cr-info" tabindex="0"
+                  data-tooltip="Все выбранные свойства dnd5e должны быть у предмета. Пустой выбор ничего не требует.">
+              <i class="fas fa-circle-info" aria-hidden="true"></i>
+            </span>
+          </div>
+          
+    <div class="cr-multiselect" data-select="requiredProperties" data-placeholder="Без ограничений">
+      <div class="cr-combobox" role="combobox" tabindex="0" aria-haspopup="listbox"
+           aria-expanded="false" aria-controls="wc-requiredProperties-options">
+        <div class="cr-selection" data-selection></div>
+        <button type="button" class="cr-icon-button cr-select-clear" data-action="clearSelect"
+                data-select-name="requiredProperties" aria-label="Очистить"
+                title="Очистить">
+          <i class="fas fa-xmark"></i>
+        </button>
+        <button type="button" class="cr-icon-button cr-select-toggle" data-action="toggleSelect"
+                data-select-name="requiredProperties" aria-label="Открыть список">
+          <i class="fas fa-chevron-down"></i>
+        </button>
+      </div>
+      <div id="wc-requiredProperties-options" class="cr-select-panel" role="listbox" aria-multiselectable="true"
+           popover="manual" hidden>
+        <div class="cr-select-toolbar">
+          <label class="cr-search">
+            <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+            <input type="search" data-select-search autocomplete="off"
+                   placeholder="Поиск...">
+          </label>
+          <div class="cr-select-actions">
+            <button type="button" data-action="selectVisible" data-select-name="requiredProperties">
+              Выбрать видимые
+            </button>
+            <button type="button" data-action="deselectVisible" data-select-name="requiredProperties">
+              Снять видимые
+            </button>
+            <button type="button" data-action="clearSelect" data-select-name="requiredProperties">
+              Очистить
+            </button>
+            <span class="cr-select-total" data-select-total></span>
+          </div>
+        </div>
+        <div class="cr-options anvil-scroll">
+      <section class="cr-option-group" data-group="items"
+               data-types="">
+        <label class="cr-option-group-header">
+          <input type="checkbox" data-group-toggle="true">
+          <span class="cr-checkbox-mark" aria-hidden="true"><i class="fas fa-check"></i></span>
+          <span>Предметы</span>
+          <span class="cr-group-count" aria-hidden="true"></span>
+        </label>
+        <div class="cr-option-group-items">
+        <label class="cr-option-row" data-search="оружие weapon">
+          <input type="checkbox" name="requiredProperties" value="weapon"
+                 data-label="Оружие">
+          <span class="cr-checkbox-mark" aria-hidden="true"><i class="fas fa-check"></i></span>
+          <span class="cr-option-label">Оружие</span>
+        </label>
+        <label class="cr-option-row" data-search="снаряжение equipment">
+          <input type="checkbox" name="requiredProperties" value="equipment"
+                 data-label="Снаряжение">
+          <span class="cr-checkbox-mark" aria-hidden="true"><i class="fas fa-check"></i></span>
+          <span class="cr-option-label">Снаряжение</span>
+        </label></div>
+      </section></div>
+        <div class="cr-select-result" data-select-result></div>
+      </div>
+    </div>
+          <p class="cr-hint">Пустой выбор не требует никаких свойств.</p>
+          <p class="cr-field-error" data-property-error="requiredProperties" hidden></p>
+        </div>
+
+        <div class="cr-field cr-field-negative">
+          <div class="cr-field-label">
+            <span class="cr-field-mark" aria-hidden="true"><i class="fas fa-circle-xmark"></i></span>
+            Запрещённые свойства
+            <span class="cr-info" tabindex="0"
+                  data-tooltip="Предмет отклоняется, если содержит хотя бы одно выбранное свойство dnd5e.">
+              <i class="fas fa-circle-info" aria-hidden="true"></i>
+            </span>
+          </div>
+          
+    <div class="cr-multiselect" data-select="forbiddenProperties" data-placeholder="Без ограничений">
+      <div class="cr-combobox" role="combobox" tabindex="0" aria-haspopup="listbox"
+           aria-expanded="false" aria-controls="wc-forbiddenProperties-options">
+        <div class="cr-selection" data-selection></div>
+        <button type="button" class="cr-icon-button cr-select-clear" data-action="clearSelect"
+                data-select-name="forbiddenProperties" aria-label="Очистить"
+                title="Очистить">
+          <i class="fas fa-xmark"></i>
+        </button>
+        <button type="button" class="cr-icon-button cr-select-toggle" data-action="toggleSelect"
+                data-select-name="forbiddenProperties" aria-label="Открыть список">
+          <i class="fas fa-chevron-down"></i>
+        </button>
+      </div>
+      <div id="wc-forbiddenProperties-options" class="cr-select-panel" role="listbox" aria-multiselectable="true"
+           popover="manual" hidden>
+        <div class="cr-select-toolbar">
+          <label class="cr-search">
+            <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+            <input type="search" data-select-search autocomplete="off"
+                   placeholder="Поиск...">
+          </label>
+          <div class="cr-select-actions">
+            <button type="button" data-action="selectVisible" data-select-name="forbiddenProperties">
+              Выбрать видимые
+            </button>
+            <button type="button" data-action="deselectVisible" data-select-name="forbiddenProperties">
+              Снять видимые
+            </button>
+            <button type="button" data-action="clearSelect" data-select-name="forbiddenProperties">
+              Очистить
+            </button>
+            <span class="cr-select-total" data-select-total></span>
+          </div>
+        </div>
+        <div class="cr-options anvil-scroll">
+      <section class="cr-option-group" data-group="items"
+               data-types="">
+        <label class="cr-option-group-header">
+          <input type="checkbox" data-group-toggle="true">
+          <span class="cr-checkbox-mark" aria-hidden="true"><i class="fas fa-check"></i></span>
+          <span>Предметы</span>
+          <span class="cr-group-count" aria-hidden="true"></span>
+        </label>
+        <div class="cr-option-group-items">
+        <label class="cr-option-row" data-search="оружие weapon">
+          <input type="checkbox" name="forbiddenProperties" value="weapon"
+                 data-label="Оружие">
+          <span class="cr-checkbox-mark" aria-hidden="true"><i class="fas fa-check"></i></span>
+          <span class="cr-option-label">Оружие</span>
+        </label>
+        <label class="cr-option-row" data-search="снаряжение equipment">
+          <input type="checkbox" name="forbiddenProperties" value="equipment"
+                 data-label="Снаряжение">
+          <span class="cr-checkbox-mark" aria-hidden="true"><i class="fas fa-check"></i></span>
+          <span class="cr-option-label">Снаряжение</span>
+        </label></div>
+      </section></div>
+        <div class="cr-select-result" data-select-result></div>
+      </div>
+    </div>
+          <p class="cr-hint">Пустой выбор не запрещает никаких свойств.</p>
+          <p class="cr-field-error" data-property-error="forbiddenProperties" hidden></p>
+        </div>
+      </div>
+
+      <div class="cr-field">
+        <div class="cr-field-label">Режим соответствия свойств</div>
+        <div class="cr-segmented" role="radiogroup"
+             aria-label="Режим соответствия свойств">
+          <label>
+            <input type="radio" name="propertyMatchMode" value="all" checked>
+            <span><i class="fas fa-circle-check" aria-hidden="true"></i>
+              Все свойства</span>
+          </label>
+          <label>
+            <input type="radio" name="propertyMatchMode" value="any" >
+            <span><i class="fas fa-circle-half-stroke" aria-hidden="true"></i>
+              Хотя бы одно</span>
+          </label>
+        </div>
+        <p class="cr-hint">Определяет проверку обязательных свойств. Для запрещённых достаточно любого совпадения.</p>
+      </div>
+    </section>
+  </div>
+
+  <section class="cr-summary" aria-live="polite">
+    <span class="cr-summary-mark" aria-hidden="true"><i class="fas fa-list-check"></i></span>
+    <div class="cr-summary-body">
+      <small>Резюме правила</small>
+      <div data-rule-summary></div>
+    </div>
+  </section>
+</div>
+<footer class="cr-footer">
+  <div class="cr-theme" role="group"
+       aria-label="Тема">
+    <button type="button" class="cr-theme-option" data-action="setTheme"
+            data-theme="auto" aria-pressed="true"
+            aria-label="Авто" data-tooltip="Авто">
+      <i class="fas fa-circle-half-stroke" aria-hidden="true"></i>
+    </button>
+    <button type="button" class="cr-theme-option" data-action="setTheme"
+            data-theme="light" aria-pressed="false"
+            aria-label="Светлая" data-tooltip="Светлая">
+      <i class="fas fa-sun" aria-hidden="true"></i>
+    </button>
+    <button type="button" class="cr-theme-option" data-action="setTheme"
+            data-theme="dark" aria-pressed="false"
+            aria-label="Тёмная" data-tooltip="Тёмная">
+      <i class="fas fa-moon" aria-hidden="true"></i>
+    </button>
+  </div>
+
+  <div class="cr-footer-actions">
+    <button type="button" class="cr-btn cr-btn-text anvil-interactive" data-action="cancel">
+        Отмена
+    </button>
+    <button type="submit" class="cr-btn cr-btn-filled anvil-interactive" data-save-button>
+      <i class="fas fa-check" aria-hidden="true"></i>
+      <span>Сохранить</span>
+    </button>
+  </div>
+</footer>
+</div></form>
+<script>
+const root=document.querySelector('.container-rules');
+root.style.setProperty('--cr-range-progress','50%');
+document.querySelectorAll('[data-selection]').forEach(el=>el.innerHTML='<span class="cr-placeholder">Без ограничений</span>');
+document.querySelectorAll('.cr-select-clear').forEach(el=>el.hidden=true);
+document.querySelector('[data-rule-summary]').innerHTML='<p>Вес содержимого снижен на 50%. Ограничений по типам и свойствам нет.</p>';
+document.querySelectorAll('[data-action=setTheme]').forEach(button=>button.onclick=()=>{if(button.dataset.theme==='auto')delete root.dataset.avTheme;else root.dataset.avTheme=button.dataset.theme;document.querySelectorAll('[data-action=setTheme]').forEach(b=>b.setAttribute('aria-pressed',b===button));});
+document.querySelectorAll('[data-action=selectTab]').forEach(button=>button.onclick=()=>{document.querySelectorAll('.cr-pane').forEach(p=>p.style.display=p.dataset.tab===button.dataset.tab?'grid':'none');document.querySelectorAll('.cr-tab').forEach(b=>{b.classList.toggle('is-active',b===button);b.setAttribute('aria-selected',b===button)});});
+</script></html>
