@@ -60,7 +60,9 @@ export function getItemMatchTokens(itemData, weaponTypeMap = {}) {
 
   const attackType = itemData?.system?.attackType;
   add(typeof attackType === "function" ? null : attackType);
-  for (const property of getItemPropertyTokens(itemData)) add(property);
+  // Properties are deliberately not subtype tokens: they have their own
+  // required/forbidden rules, and letting them satisfy a subtype rule makes
+  // any property key that happens to share a subtype's name slip through.
   return tokens;
 }
 

@@ -11,8 +11,10 @@ import {
   containerCurrencyLbs,
   getSystemWeightUnit,
   getWeaponTypeMap,
+  getWeightUnitLabel,
   lbsToDisplay
 } from "../integrations/dnd5e.js";
+import { ruleTokenLabels } from "../ui/rule-presentation.js";
 
 function makeItemCandidate(item, changes = {}) {
   const source = item?.toObject?.() ?? {
@@ -31,60 +33,135 @@ function makeItemCandidate(item, changes = {}) {
   return candidate;
 }
 
+/**
+ * Change paths that can move weight or break a content rule. An update that
+ * touches none of them (charges, equipped, description...) cannot create a
+ * violation, so it skips the whole projection.
+ */
+const RELEVANT_CHANGE_PATHS = [
+  ["type"],
+  ["system", "container"],
+  ["system", "quantity"],
+  ["system", "weight"],
+  ["system", "capacity"],
+  ["system", "currency"],
+  ["system", "properties"],
+  ["system", "type"],
+  ["flags", MODULE_ID]
+];
+
+function touchesPath(changes, path) {
+  let node = changes;
+  for (const key of path) {
+    if (!node || typeof node !== "object") return false;
+    // Foundry's deletion syntax (`-=key`) removes the value outright.
+    if (Object.hasOwn(node, `-=${key}`)) return true;
+    if (!Object.hasOwn(node, key)) return false;
+    node = node[key];
+  }
+  return true;
+}
+
+export function isRelevantItemChange(changes) {
+  const expanded = foundry.utils.expandObject(changes ?? {});
+  return RELEVANT_CHANGE_PATHS.some(path => touchesPath(expanded, path));
+}
+
+/**
+ * Items created alongside this one in the same operation - dnd5e drops a
+ * container together with its contents in one `createDocuments(..., {keepId})`
+ * call. Without them the projection would weigh the container empty, and its
+ * contents would point at a container that does not exist yet.
+ */
+function creationSiblings(options, candidate) {
+  if (!options?.keepId || !Array.isArray(options.data)) return [];
+  return options.data
+    .filter(data => data && typeof data === "object" && data._id && data._id !== candidate.id)
+    .map(data => ({ ...foundry.utils.deepClone(data), id: data._id }));
+}
+
+function localizeFallback(key, fallback) {
+  const value = game.i18n?.localize?.(key);
+  return value && value !== key ? value : fallback;
+}
+
 function makeRestrictionMessage({ containerName, itemName, restrictions }) {
   const details = [];
+  const list = name => ruleTokenLabels(name, restrictions[name]).join(", ");
   if (restrictions.allowedTypes.length) {
     details.push(game.i18n.format(`${MODULE_ID}.restrictionMessage.types`, {
-      types: restrictions.allowedTypes.join(", ")
+      types: list("allowedTypes")
     }));
   }
   if (restrictions.allowedSubtypes.length) {
     details.push(game.i18n.format(`${MODULE_ID}.restrictionMessage.subtypes`, {
-      subtypes: restrictions.allowedSubtypes.join(", ")
+      subtypes: list("allowedSubtypes")
     }));
   }
   if (restrictions.requiredProperties.length) {
     details.push(game.i18n.format(`${MODULE_ID}.restrictionMessage.properties`, {
-      properties: restrictions.requiredProperties.join(", ")
+      properties: list("requiredProperties")
     }));
   }
   if (restrictions.forbiddenProperties.length) {
     details.push(game.i18n.format(
       `${MODULE_ID}.restrictionMessage.forbiddenProperties`,
-      { properties: restrictions.forbiddenProperties.join(", ") }
+      { properties: list("forbiddenProperties") }
     ));
   }
   return game.i18n.format(`${MODULE_ID}.restrictionMessage.default`, {
-    containerName: containerName ?? "Container",
-    itemName: itemName ?? "Item",
+    containerName: containerName
+      ?? localizeFallback(`${MODULE_ID}.fallback.container`, "Container"),
+    itemName: itemName ?? localizeFallback(`${MODULE_ID}.fallback.item`, "Item"),
     rules: details.join("; ")
   });
 }
 
-function makeCapacityMessage(violation) {
-  const custom = (game.settings.get(MODULE_ID, "exceedMessageText") ?? "").trim();
-  if (custom) return custom;
-  const containerName = violation.containerName ?? "Container";
+function getCustomExceedText() {
+  try {
+    return String(game.settings.get(MODULE_ID, "exceedMessageText") ?? "").trim();
+  } catch {
+    return "";
+  }
+}
 
+/** `{name}` placeholders in the GM's custom text, left alone when unknown. */
+function fillPlaceholders(template, values) {
+  return template.replace(/\{(\w+)\}/g, (match, key) => (
+    Object.hasOwn(values, key) ? String(values[key]) : match
+  ));
+}
+
+export function makeCapacityMessage(violation) {
+  const containerName = violation.containerName
+    ?? localizeFallback(`${MODULE_ID}.fallback.container`, "Container");
+
+  let key;
+  let values;
   if (violation.kind === "count") {
-    return game.i18n.format(`${MODULE_ID}.exceedMessage.count`, {
+    key = `${MODULE_ID}.exceedMessage.count`;
+    values = {
       containerName,
       before: Math.round(violation.before),
       delta: Math.round(violation.delta),
-      capacity: Math.round(violation.capacity)
-    });
+      capacity: Math.round(violation.capacity),
+      unit: localizeFallback(`${MODULE_ID}.fallback.items`, "items")
+    };
+  } else {
+    key = `${MODULE_ID}.exceedMessage.default`;
+    const format = value => Number(lbsToDisplay(value).toFixed(2));
+    values = {
+      containerName,
+      before: format(violation.before),
+      delta: format(violation.delta),
+      capacity: format(violation.capacity),
+      unit: getWeightUnitLabel(getSystemWeightUnit())
+    };
   }
 
-  const metric = getSystemWeightUnit() === "kg";
-  const key = metric
-    ? `${MODULE_ID}.exceedMessage.default_kg`
-    : `${MODULE_ID}.exceedMessage.default`;
-  return game.i18n.format(key, {
-    containerName,
-    before: lbsToDisplay(violation.before).toFixed(2),
-    delta: lbsToDisplay(violation.delta).toFixed(2),
-    capacity: lbsToDisplay(violation.capacity).toFixed(2)
-  });
+  const custom = getCustomExceedText();
+  if (custom) return fillPlaceholders(custom, values);
+  return game.i18n.format(key, values);
 }
 
 /**
@@ -115,7 +192,14 @@ function getNotifyScope() {
   }
 }
 
-/** Escape hatch for other modules and macros: `{ [MODULE_ID]: { bypass: true } }`. */
+/**
+ * Escape hatch for other modules and macros: `{ [MODULE_ID]: { bypass: true } }`.
+ * A fresh object each call, since Foundry passes operation options around.
+ */
+export function bypassOption() {
+  return { [MODULE_ID]: { bypass: true } };
+}
+
 function isBypassed(options) {
   return options?.[MODULE_ID]?.bypass === true;
 }
@@ -169,17 +253,21 @@ export function registerEnforcementHooks({ logger, socket }) {
     if (isBypassed(options)) return;
     const actor = item?.parent;
     if (!actor?.items) return;
+    if (!isCreate && !isRelevantItemChange(changes)) return;
 
     const candidate = makeItemCandidate(item, changes);
-    const projectedActor = createProjectedActor(actor, candidate);
+    const siblings = isCreate ? creationSiblings(options, candidate) : [];
+    const projectedActor = createProjectedActor(actor, candidate, siblings);
     const destinationId = candidate.system?.container ?? null;
     const previousId = isCreate ? null : (item.system?.container ?? null);
 
     // Only validate content rules when the item is actually entering a
     // container. Re-checking on every edit freezes anything already inside a
     // container whose rules were tightened afterwards - it could not even be
-    // equipped or renamed.
-    if (destinationId && destinationId !== previousId) {
+    // equipped or renamed. Contents created together with their container
+    // were already inside it, so they are not re-judged either.
+    const arrivesWithContainer = siblings.some(entry => entry.id === destinationId);
+    if (destinationId && destinationId !== previousId && !arrivesWithContainer) {
       const destination = getItem(projectedActor, destinationId);
       if (destination && !enforceRestrictions(actor, destination, candidate)) return false;
     }

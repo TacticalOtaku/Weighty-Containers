@@ -2,28 +2,31 @@ import { lbsPerUnit, lbsToUnit, setUnitConversionTable } from "../core/units.js"
 
 export const CONTAINER_DATA_MODEL_PATH = "CONFIG.Item.dataModels.container";
 
+// Order matters: dnd5e builds `equipmentTypes` as misc equipment *plus* the
+// armor types, so armor is listed first and claims its own options; the
+// equipment group then only keeps what is left.
 const SUBTYPE_CATALOGS = [
   { key: "weaponTypes", labelKey: "weaponTypes", types: ["weapon"] },
   { key: "consumableTypes", labelKey: "consumableTypes", types: ["consumable"] },
-  { key: "equipmentTypes", labelKey: "equipmentTypes", types: ["equipment"] },
   { key: "armorTypes", labelKey: "armorTypes", types: ["equipment"] },
+  { key: "equipmentTypes", labelKey: "equipmentTypes", types: ["equipment"] },
   { key: "toolTypes", labelKey: "toolTypes", types: ["tool"] },
   { key: "lootTypes", labelKey: "lootTypes", types: ["loot"] }
 ];
 
+// dnd5e 3.0 folded the per-type property tables into one `itemProperties`
+// table plus `validProperties`; the old tables no longer exist.
 const PROPERTY_CATALOGS = [
-  { key: "itemProperties", labelKey: "itemProperties" },
-  { key: "weaponProperties", labelKey: "weaponProperties" },
-  { key: "equipmentProperties", labelKey: "equipmentProperties" },
-  { key: "consumableProperties", labelKey: "consumableProperties" }
+  { key: "itemProperties", labelKey: "itemProperties" }
 ];
 
 /**
  * Item types that can physically sit inside a container. Everything else
- * dnd5e registers (class, spell, feat, ...) is noise in the rules dialog.
+ * dnd5e registers (class, spell, feat, facility, ...) is noise in the rules
+ * dialog.
  */
 const PHYSICAL_ITEM_TYPES = new Set([
-  "weapon", "equipment", "consumable", "tool", "loot", "container", "backpack", "facility"
+  "weapon", "equipment", "consumable", "tool", "loot", "container"
 ]);
 
 function getConfig() {
@@ -136,10 +139,16 @@ export function getRawContentsWeight(containerItem) {
   return total;
 }
 
-/** Short label for a weight unit, e.g. "lb" or "kg". */
+/** Short label for a weight unit, e.g. "lb" or "kg", localized when possible. */
 export function getWeightUnitLabel(unit) {
   const key = unit || getSystemWeightUnit();
-  return getDnd5eConfig().weightUnits?.[key]?.abbreviation ?? key;
+  const abbreviation = getDnd5eConfig().weightUnits?.[key]?.abbreviation;
+  if (!abbreviation) return key;
+  try {
+    return globalThis.game?.i18n?.localize?.(abbreviation) ?? abbreviation;
+  } catch {
+    return abbreviation;
+  }
 }
 
 /**

@@ -1,5 +1,6 @@
 import { LOG_LEVELS, MODULE_ID } from "../constants.js";
-import { getReductionPct, num } from "../core/weight.js";
+import { convertWeightToLbs, lbsToUnit } from "../core/units.js";
+import { getReductionPct, isContainer, num } from "../core/weight.js";
 import {
   CONTAINER_DATA_MODEL_PATH,
   getContainerDataModelClass,
@@ -39,7 +40,13 @@ export function registerModuleSettings(logger) {
       config: true,
       restricted: true,
       type: Boolean,
-      default: true
+      default: true,
+      // Container sheets read the setting when they draw the capacity bar.
+      onChange: () => {
+        for (const app of foundry.applications?.instances?.values() ?? []) {
+          if (app.document?.type === "container" && app.rendered) app.render();
+        }
+      }
     });
     game.settings.register(MODULE_ID, "notifyScope", {
       name: `${MODULE_ID}.notifyScope.name`,
@@ -106,12 +113,15 @@ export function registerModuleSettings(logger) {
       default: 500,
       onChange: value => { logger.bufferLimit = Math.max(0, num(value, 500)); }
     });
+    // World scope: the text is shown to whoever the rejection is sent to, so
+    // it has to be the GM's text, not whatever the acting player typed into
+    // their own client settings.
     game.settings.register(MODULE_ID, "exceedMessageText", {
       name: `${MODULE_ID}.exceedMessageText.name`,
       hint: `${MODULE_ID}.exceedMessageText.hint`,
-      scope: "client",
+      scope: "world",
       config: true,
-      restricted: false,
+      restricted: true,
       type: String,
       default: ""
     });
@@ -142,6 +152,23 @@ export function registerUnitConversion(logger) {
 }
 
 /**
+ * Install the ContainerData patch at `setup`: dnd5e has registered its data
+ * models by then, and no world document has been prepared yet, so every
+ * actor is prepared with the reduction from the start. Only if that fails is
+ * it retried at `ready`, followed by a one-off re-preparation of the actors.
+ */
+export function registerContainerPatch(logger) {
+  let patched = false;
+  Hooks.once("setup", () => {
+    patched = patchContainerDataGetters({ logger });
+  });
+  Hooks.once("ready", () => {
+    if (patched) return;
+    if (patchContainerDataGetters({ logger })) refreshPreparedActors(logger);
+  });
+}
+
+/**
  * Scale dnd5e's own contents weight by the container's reduction.
  *
  * Everything else is left to the system: `contentsWeight` already walks
@@ -152,7 +179,7 @@ export function registerUnitConversion(logger) {
  * reduction show up on the capacity bar, the inventory row and the encumbrance
  * track at once - with no second implementation to drift out of sync.
  */
-export function patchContainerDataGetters({ logger }) {
+export function patchContainerDataGetters({ logger, includeNested = readIncludeNested }) {
   const containerDataClass = getContainerDataModelClass();
   if (!containerDataClass) {
     logger.error(
@@ -194,12 +221,72 @@ export function patchContainerDataGetters({ logger }) {
     configurable: true,
     enumerable: descriptor.enumerable ?? true
   });
+  patchComputeCapacity(prototype, { logger, includeNested });
   Object.defineProperty(prototype, `__${MODULE_ID}_patched`, {
     value: true,
     enumerable: false
   });
   logger.info("Patched ContainerData.contentsWeight getter");
   return true;
+}
+
+function readIncludeNested() {
+  try {
+    return game.settings.get(MODULE_ID, "includeNested") !== false;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Contents weight of a container counting sub-containers by their own weight
+ * only, in the container's weight units, with its reduction applied. This is
+ * what the module enforces when "Include nested containers" is off.
+ * @returns {number|Promise<number>}
+ */
+export function directContentsWeight(containerData) {
+  const units = containerData.weight?.units;
+  const reduction = getReductionPct(containerData.parent) / 100;
+  const sum = contents => {
+    let total = Number(containerData.currencyWeight) || 0;
+    for (const child of contents ?? []) {
+      if (isContainer(child)) {
+        const own = convertWeightToLbs(child.system?.weight?.value, child.system?.weight?.units, units);
+        total += lbsToUnit(own, units || "lb");
+      } else {
+        total += Number(child.system?.totalWeightIn?.(units)) || 0;
+      }
+    }
+    return Math.max(0, Number((total * (1 - reduction)).toFixed(4)));
+  };
+  const contents = containerData.contents;
+  if (contents instanceof Promise) return contents.then(sum);
+  return sum(contents);
+}
+
+/**
+ * Keep dnd5e's capacity bar in step with enforcement when nested contents are
+ * excluded. Encumbrance is left alone - the weight is still carried - only
+ * the container's own "how full am I" reading changes.
+ */
+function patchComputeCapacity(prototype, { logger, includeNested }) {
+  const original = prototype.computeCapacity;
+  if (typeof original !== "function") {
+    logger.debug("computeCapacity not found on ContainerData; capacity bar left as is");
+    return;
+  }
+  prototype.computeCapacity = async function computeCapacityWithRules(...args) {
+    const context = await original.apply(this, args);
+    if (includeNested() || !context || this.capacity?.count || !this.capacity?.weight?.value) {
+      return context;
+    }
+    const value = await directContentsWeight(this);
+    context.value = Math.round(value * 10) / 10;
+    context.pct = context.max
+      ? Math.min(100, Math.max(0, (context.value / context.max) * 100))
+      : 0;
+    return context;
+  };
 }
 
 /**

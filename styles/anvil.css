@@ -100,20 +100,30 @@
 
    Priority, lowest to highest:
      operating system      color-scheme: light dark
-     Foundry's theme       body.theme-light / body.theme-dark
+     Foundry's interface   body.theme-light / body.theme-dark
+     Foundry's app theme   .themed.theme-light / .themed.theme-dark
+                           on the window root (v13+ themes windows
+                           separately from the interface)
      module override       [data-av-theme] on the window root
 
-   The override is an attribute on the element itself, so it beats
-   the body class whichever way that class points.
+   The override is an attribute on the element itself; the two
+   Foundry rules step aside whenever it is present.
    ------------------------------------------------------------ */
 
 .anvil { color-scheme: light dark; }
 
-body.theme-light .anvil:not([data-av-theme="dark"]),
+body.theme-light .anvil:not([data-av-theme]),
+.anvil.themed.theme-light:not([data-av-theme]),
 .anvil[data-av-theme="light"] { color-scheme: light; }
 
-body.theme-dark .anvil:not([data-av-theme="light"]),
+body.theme-dark .anvil:not([data-av-theme]),
+.anvil.themed.theme-dark:not([data-av-theme]),
 .anvil[data-av-theme="dark"] { color-scheme: dark; }
+
+/* Components set their own `display`, which outranks the browser's
+   [hidden] rule. One rule here keeps `hidden` meaning hidden for
+   every component instead of a per-component patch. */
+.anvil [hidden] { display: none !important; }
 
 /* ------------------------------------------------------------
    2. COLOUR ROLES
