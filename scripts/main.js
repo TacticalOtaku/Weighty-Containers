@@ -16,8 +16,7 @@ import { buildDebugApi } from "./foundry/debug.js";
 import { registerEnforcementHooks } from "./foundry/enforcement.js";
 import { LOG } from "./foundry/logger.js";
 import {
-  patchContainerDataGetters,
-  refreshPreparedActors,
+  registerContainerPatch,
   registerModuleSettings,
   registerUnitConversion
 } from "./foundry/runtime.js";
@@ -93,15 +92,13 @@ function notifyExceedRemote(data) {
 
 registerModuleSettings(LOG);
 registerUnitConversion(LOG);
+// The reduction rides on dnd5e's own contentsWeight, so the capacity bar,
+// the inventory rows and the encumbrance track all pick it up from one patch.
+registerContainerPatch(LOG);
 
 Hooks.once("ready", () => {
   wcSocket.register("notifyExceedRemote", notifyExceedRemote);
   wcSocket.init();
-
-  // The reduction rides on dnd5e's own contentsWeight, so the capacity bar,
-  // the inventory rows and the encumbrance track all pick it up from one patch.
-  const patched = patchContainerDataGetters({ logger: LOG });
-  if (patched) refreshPreparedActors(LOG);
 
   registerEnforcementHooks({ logger: LOG, socket: wcSocket });
   registerSheetUiHooks();

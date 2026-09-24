@@ -57,6 +57,11 @@ container's fill state, or `null` if the container is unknown.
 containers are walked. Do not recompute this from raw item weights — the two
 numbers will drift.
 
+For a container with dnd5e's `weightlessContents` (a Bag of Holding) the load
+is still what is inside it - that is what its capacity is measured against, and
+what dnd5e's own capacity bar shows. The property only stops the contents from
+counting toward whatever holds the container.
+
 `loadLbs` is always equal to what dnd5e itself puts in
 `container.system.contentsWeight` for a container whose `weight.units` is `lb`.
 If those two ever disagree, that is a bug in this module.
@@ -67,8 +72,11 @@ If those two ever disagree, that is a bug in this module.
 - `getContainerRestrictions(container)` → `{ allowedTypes, allowedSubtypes, requiredProperties, forbiddenProperties, propertyMatchMode }`, all normalized to lowercase token arrays. Flags are stored as either arrays or delimited strings; this normalizes both.
 - `validateContainerRestrictions(container, itemData)` → `{ ok, reason?, restrictions }`. `reason` is one of `"type" | "subtype" | "property" | "forbiddenProperty"`.
 
-Call the validator rather than reimplementing it: it matches against item type,
-subtype, base item, identifier, weapon-type aliases and properties.
+Call the validator rather than reimplementing it: it matches subtype rules
+against item type, subtype (including consumable subtypes such as `arrow`),
+base item, identifier and weapon-type aliases. Properties are matched only by
+the required/forbidden property rules; since 3.6.0 they no longer satisfy a
+subtype rule.
 
 ### Weight
 
@@ -88,7 +96,8 @@ own factor or your numbers will not match the sheet.
 
 - `isContainer(item)` → boolean
 - `isWeightlessContainer(item)` → boolean — carries dnd5e's `weightlessContents`
-  property, so nothing inside it counts
+  property, so nothing inside it counts toward whatever holds it (its own
+  capacity still does)
 - `openRulesDialog(container, { readOnly } = {})` → opens the rules window,
   returns the app. Defaults to read-only for non-GMs.
 - `openReductionDialog` — alias kept for callers written before 3.4.0
@@ -136,6 +145,26 @@ await item.update({ "system.container": bagId }, {
   "weighty-containers": { bypass: true }
 });
 ```
+
+The rules dialog saves this way itself: a GM lowering a full bag's reduction is
+changing a rule, not stuffing an item in, and is never blocked by it.
+
+Updates that cannot move weight or break a content rule - charges, equipped
+state, names, descriptions - are not checked at all. Only changes to `type`,
+`system.container`, `quantity`, `weight`, `capacity`, `currency`,
+`properties`, `system.type` or the module's flags are.
+
+## Behaviour changes in 3.6.0
+
+These are fixes, so `apiVersion` stays at 2, but numbers and outcomes can change:
+
+- **Bag of Holding.** `computeAdjustedLoad` / `getContainerLoad` for a
+  `weightlessContents` container return what is inside it instead of `0`, and
+  its capacity is enforced.
+- **Subtype rules** no longer accept a property key as a subtype.
+- **Containers created with their contents** (dnd5e's `createWithContents`)
+  are weighed full, so an over-full container can no longer be dropped into a
+  bag that has no room for it.
 
 ## Migrating from apiVersion 1
 

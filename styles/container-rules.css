@@ -11,9 +11,13 @@
 
 /* ------------------------------------------------------------
    Sheet header button — the documented exception
+
+   In a framed sheet the button is a native Foundry header control
+   and takes Foundry's styling. These rules only dress the fallback
+   placed inside a frameless sheet's own header.
    ------------------------------------------------------------ */
 
-.wc-inline-gear {
+.wc-inline-gear:not(.header-control) {
   align-items: center;
   background: color-mix(in srgb, currentColor 8%, transparent);
   border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
@@ -32,24 +36,25 @@
   width: 22px;
 }
 
-.wc-inline-gear:hover {
+.wc-inline-gear:not(.header-control):hover {
   background: color-mix(in srgb, currentColor 18%, transparent);
   border-color: color-mix(in srgb, currentColor 45%, transparent);
   transform: translateY(-1px);
 }
 
-.wc-inline-gear:active { transform: scale(.9); }
-.wc-inline-gear i { transition: transform 260ms cubic-bezier(.34, 1.4, .64, 1); }
-.wc-inline-gear:hover i { transform: rotate(35deg); }
+.wc-inline-gear:not(.header-control):active { transform: scale(.9); }
+.wc-inline-gear:not(.header-control) i { transition: transform 260ms cubic-bezier(.34, 1.4, .64, 1); }
+.wc-inline-gear:not(.header-control):hover i { transform: rotate(35deg); }
 
 /* ============================================================
    Window
    ============================================================ */
 
+/* Matches the minimum in scripts/ui/window-position.js. */
 .container-rules {
-  container-type: inline-size;
-  min-height: 480px;
-  min-width: 400px;
+  container: cr-window / inline-size;
+  min-height: 440px;
+  min-width: 360px;
   background: var(--a-surface);
   border: 1px solid var(--a-outline-variant);
   border-radius: var(--a-shape-lg);
@@ -98,9 +103,19 @@
 .wc-confirm button[data-action="no"] { background: var(--a-primary); color: var(--a-on-primary); }
 .wc-confirm button[data-action]:hover { box-shadow: var(--a-shadow-1); }
 
-.container-rules .window-content {
+/* The shell below is a size container, so its height must come from the
+   window rather than its content. Foundry lays windows out this way already;
+   the module states it too instead of depending on that. */
+.container-rules {
   display: flex;
   flex-direction: column;
+}
+
+.container-rules .window-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
   overflow: hidden;
   padding: 0;
   border-radius: 0 0 var(--a-shape-lg) var(--a-shape-lg);
@@ -152,7 +167,11 @@
   font-size: 6px;
 }
 
+/* The shell's size comes from the window, never from its content, so it
+   can be a size container: that is what gives the summary's cqh a real
+   height to be a share of, and lets short windows be queried. */
 .container-rules .cr-shell {
+  container: cr-shell / size;
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -677,7 +696,6 @@
   padding: var(--a-space-4) var(--a-space-5);
 }
 
-.container-rules .cr-field-error[hidden] { display: none; }
 
 .container-rules .cr-field-error button {
   background: var(--a-error);
@@ -709,7 +727,6 @@
   padding: var(--a-space-5) var(--a-space-6);
 }
 
-.container-rules .cr-notice[hidden] { display: none; }
 
 .container-rules .cr-notice-warn {
   background: var(--a-secondary-container);
@@ -917,7 +934,6 @@
 }
 
 .container-rules .cr-icon-button:active { transform: scale(.86); }
-.container-rules .cr-select-clear[hidden] { display: none; }
 
 .container-rules .cr-select-toggle i {
   transition: transform var(--a-dur-medium) var(--a-spring);
@@ -957,7 +973,6 @@
   transform-origin: bottom center;
 }
 
-.container-rules .cr-select-panel[hidden] { display: none; }
 
 .container-rules .cr-select-toolbar {
   border-bottom: 1px solid var(--a-outline-variant);
@@ -1046,7 +1061,6 @@
   padding-block-start: var(--a-space-4);
 }
 
-.container-rules .cr-option-group[hidden] { display: none; }
 .container-rules .cr-option-group.is-unavailable { opacity: .5; }
 
 .container-rules .cr-option-group-header {
@@ -1090,7 +1104,6 @@
     color var(--a-dur-short) var(--a-ease);
 }
 
-.container-rules .cr-option-row[hidden] { display: none; }
 .container-rules .cr-option-row:hover { background: var(--a-state-hover); }
 
 .container-rules .cr-option-row.is-selected {
@@ -1320,17 +1333,30 @@
    Read-only
    ============================================================ */
 
+/* Lists stay openable and searchable read-only, so every selection
+   can be read; only the controls that would change something go. */
 .container-rules.cr-readonly .cr-dial,
-.container-rules.cr-readonly .cr-multiselect,
 .container-rules.cr-readonly .cr-segmented {
   opacity: .78;
   pointer-events: none;
 }
 
 .container-rules.cr-readonly .cr-select-clear,
-.container-rules.cr-readonly .cr-select-toggle {
+.container-rules.cr-readonly .cr-select-actions button,
+.container-rules.cr-readonly .cr-notice [data-action="removeUnavailable"] {
   display: none;
 }
+
+.container-rules.cr-readonly .cr-chip,
+.container-rules.cr-readonly .cr-option-row,
+.container-rules.cr-readonly .cr-option-group-header {
+  cursor: default;
+}
+
+.container-rules.cr-readonly .cr-chip { pointer-events: none; }
+.container-rules.cr-readonly .cr-chip i { display: none; }
+.container-rules.cr-readonly .cr-option-row:hover,
+.container-rules.cr-readonly .cr-option-group-header:hover { background: none; }
 
 /* ============================================================
    Entry choreography
@@ -1373,7 +1399,7 @@
    resizable and is routinely narrow on a wide screen.
    ============================================================ */
 
-@container (max-width: 780px) {
+@container cr-window (max-width: 780px) {
   .container-rules .cr-hero {
     grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
     row-gap: var(--a-space-6);
@@ -1383,23 +1409,34 @@
   .container-rules .cr-panes { padding: var(--a-space-6); }
 }
 
-@container (max-width: 560px) {
+@container cr-window (max-width: 560px) {
   .container-rules .cr-hero {
+    gap: var(--a-space-4);
     grid-template-columns: 1fr;
     padding: var(--a-space-6);
   }
 
-  .container-rules .cr-readout { justify-items: start; }
+  .container-rules .cr-hero-id { padding-bottom: var(--a-space-4); }
+
+  .container-rules .cr-readout {
+    align-items: center;
+    display: flex;
+    justify-content: space-between;
+    white-space: normal;
+  }
+
+  .container-rules .cr-readout strong { flex-wrap: wrap; }
 
   .container-rules .cr-tabs { padding-inline: var(--a-space-4); }
 
   .container-rules .cr-tab {
     flex: 1;
+    font-size: var(--a-text-sm);
+    gap: var(--a-space-2);
     justify-content: center;
     padding-inline: var(--a-space-4);
   }
 
-  .container-rules .cr-tab { font-size: var(--a-text-sm); gap: var(--a-space-2); }
   .container-rules .cr-tab > i { display: none; }
 
   .container-rules .cr-preset-grid {
@@ -1418,23 +1455,30 @@
   .container-rules .cr-summary,
   .container-rules .cr-footer { padding-inline: var(--a-space-5); }
 
-  .container-rules .cr-summary {
-    max-height: 30cqh;
-    overflow-y: auto;
+  .container-rules .cr-summary { max-height: 30cqh; }
+
+  .container-rules .cr-footer { gap: var(--a-space-3); }
+
+  .container-rules .cr-btn {
+    min-width: 0;
+    padding-inline: var(--a-space-5);
   }
 
-  .container-rules .cr-btn { min-width: 0; }
   .container-rules .cr-dirty-state span { display: none; }
 }
 
-/* Short windows retain usable scrolling space and visible actions. */
-@container (max-width: 560px) {
-  .container-rules .cr-hero { gap: var(--a-space-4); }
-  .container-rules .cr-hero-id { padding-bottom: var(--a-space-4); }
-  .container-rules .cr-readout { display: flex; align-items: center; justify-content: space-between; white-space: normal; }
-  .container-rules .cr-readout strong { flex-wrap: wrap; }
-  .container-rules .cr-footer { gap: var(--a-space-3); }
-  .container-rules .cr-btn { padding-inline: var(--a-space-5); }
+/* Short windows: give the panes the room, not the chrome. */
+@container cr-shell (max-height: 520px) {
+  .container-rules .cr-hero {
+    padding-block: var(--a-space-5);
+    row-gap: var(--a-space-4);
+  }
+
+  .container-rules .cr-hero-id { padding-bottom: var(--a-space-3); }
+  .container-rules .cr-hero-icon { height: 34px; width: 34px; }
+  .container-rules .cr-hero-copy strong { font-size: var(--a-text-xl); }
+  .container-rules .cr-dial-scale { display: none; }
+  .container-rules .cr-summary { max-height: 18cqh; }
 }
 
 .container-rules .cr-preset-icon {
@@ -1445,7 +1489,8 @@
 .container-rules .cr-btn-filled:active:not(:disabled) { transform: translateY(0) scale(.97); }
 
 @media (prefers-reduced-motion: reduce) {
-  .wc-inline-gear, .wc-inline-gear i { transition: none; }
+  .wc-inline-gear:not(.header-control),
+  .wc-inline-gear:not(.header-control) i { transition: none; }
   .container-rules .cr-preset:hover,
   .container-rules .cr-preset:hover .cr-preset-icon,
   .container-rules .cr-btn:hover { transform: none; }

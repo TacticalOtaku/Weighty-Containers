@@ -16,7 +16,8 @@ import {
 
 export function escapeHtml(value) {
   const text = String(value ?? "");
-  if (foundry.utils.escapeHTML) return foundry.utils.escapeHTML(text);
+  const escape = globalThis.foundry?.utils?.escapeHTML;
+  if (escape) return escape(text);
   return text.replace(/[&<>"']/g, c => ({
     "&": "&amp;",
     "<": "&lt;",
@@ -105,19 +106,40 @@ export function getRuleItemTypeGroups() {
   return [{ label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.itemTypes`), options }];
 }
 
-export function getRuleSubtypeGroups() {
-  const groups = [];
-  const addGroup = ({ key, labelKey, types = [], values }) => {
-    const options = optionsFromConfig(values);
-    if (options.length) groups.push({
-      key,
-      label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.${labelKey}`),
-      options,
-      types
-    });
-  };
+/**
+ * Options of a catalog that are not already offered by an earlier group.
+ * dnd5e's catalogs overlap (equipment types contain every armor type), and
+ * the same checkbox twice in one list only reads as a bug.
+ */
+function takeUnseen(options, seen) {
+  return options.filter(option => {
+    if (seen.has(option.value)) return false;
+    seen.add(option.value);
+    return true;
+  });
+}
 
-  groups.push({
+/** Nested subtype tables, e.g. consumableTypes.ammo.subtypes (arrow, bolt...). */
+function nestedSubtypeGroups(catalog, seen) {
+  const groups = [];
+  if (!catalog.values || typeof catalog.values !== "object") return groups;
+  for (const [parent, entry] of Object.entries(catalog.values)) {
+    const subtypes = entry && typeof entry === "object" ? entry.subtypes : null;
+    const options = takeUnseen(optionsFromConfig(subtypes), seen);
+    if (!options.length) continue;
+    groups.push({
+      key: `${catalog.key}-${parent}`,
+      label: localizeConfigLabel(entry.label, parent),
+      options,
+      types: catalog.types ?? []
+    });
+  }
+  return groups;
+}
+
+export function getRuleSubtypeGroups() {
+  const seen = new Set(["melee", "ranged"]);
+  const groups = [{
     key: "weaponRange",
     label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.weaponRange`),
     types: ["weapon"],
@@ -125,26 +147,20 @@ export function getRuleSubtypeGroups() {
       { value: "melee", label: game.i18n.localize(`${MODULE_ID}.configDialog.option.melee`) },
       { value: "ranged", label: game.i18n.localize(`${MODULE_ID}.configDialog.option.ranged`) }
     ]
-  });
+  }];
 
-  for (const catalog of getSubtypeCatalogs()) addGroup(catalog);
-
-  if (!groups.some(g => g.options.length)) {
-    groups.push({
-      key: "commonSubtypes",
-      label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.commonSubtypes`),
-      types: [],
-      options: [
-        { value: "melee", label: game.i18n.localize(`${MODULE_ID}.configDialog.option.melee`) },
-        { value: "ranged", label: game.i18n.localize(`${MODULE_ID}.configDialog.option.ranged`) },
-        { value: "ammo", label: "Ammo" },
-        { value: "potion", label: "Potion" },
-        { value: "scroll", label: "Scroll" },
-        { value: "wand", label: "Wand" },
-        { value: "grenade", label: "Grenade" }
-      ]
+  const nested = [];
+  for (const catalog of getSubtypeCatalogs()) {
+    const options = takeUnseen(optionsFromConfig(catalog.values), seen);
+    if (options.length) groups.push({
+      key: catalog.key,
+      label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.${catalog.labelKey}`),
+      options,
+      types: catalog.types ?? []
     });
+    nested.push(catalog);
   }
+  for (const catalog of nested) groups.push(...nestedSubtypeGroups(catalog, seen));
 
   return groups;
 }
@@ -152,56 +168,56 @@ export function getRuleSubtypeGroups() {
 export function getRulePropertyGroups() {
   const groups = [];
   const seen = new Set();
-  const addGroup = ({ key, labelKey, values }) => {
-    const options = optionsFromConfig(values).filter(option => {
-      if (seen.has(option.value)) return false;
-      seen.add(option.value);
-      return true;
-    });
+
+  for (const catalog of getPropertyCatalogs()) {
+    const options = takeUnseen(optionsFromConfig(catalog.values), seen);
     if (options.length) groups.push({
-      key,
-      label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.${labelKey}`),
+      key: catalog.key,
+      label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.${catalog.labelKey}`),
       options
     });
-  };
-
-  for (const catalog of getPropertyCatalogs()) addGroup(catalog);
-
-  for (const [itemType, properties] of Object.entries(getValidPropertiesByItemType())) {
-      const options = optionsFromConfig(properties).filter(option => {
-        if (seen.has(option.value)) return false;
-        seen.add(option.value);
-        return true;
-      });
-      if (options.length) groups.push({
-        key: `validProperties-${itemType}`,
-        label: localizeConfigLabel(`TYPES.Item.${itemType}`, itemType),
-        options
-      });
   }
 
-  if (!groups.length) {
-    groups.push({
-      key: "itemProperties",
-      label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.itemProperties`),
-      options: [
-        { value: "amm", label: "Ammunition" },
-        { value: "fin", label: "Finesse" },
-        { value: "fir", label: "Firearm" },
-        { value: "hvy", label: "Heavy" },
-        { value: "lgt", label: "Light" },
-        { value: "mgc", label: "Magical" },
-        { value: "rch", label: "Reach" },
-        { value: "rel", label: "Reload" },
-        { value: "ret", label: "Returning" },
-        { value: "thr", label: "Thrown" },
-        { value: "two", label: "Two-Handed" },
-        { value: "ver", label: "Versatile" }
-      ]
+  for (const [itemType, properties] of Object.entries(getValidPropertiesByItemType())) {
+    const options = takeUnseen(optionsFromConfig(properties), seen);
+    if (options.length) groups.push({
+      key: `validProperties-${itemType}`,
+      label: localizeConfigLabel(`TYPES.Item.${itemType}`, itemType),
+      options
     });
   }
 
   return groups;
+}
+
+const RULE_GROUP_SOURCES = {
+  allowedTypes: getRuleItemTypeGroups,
+  allowedSubtypes: getRuleSubtypeGroups,
+  requiredProperties: getRulePropertyGroups,
+  forbiddenProperties: getRulePropertyGroups
+};
+
+/**
+ * Human labels for stored rule tokens, e.g. `mgc` -> "Magical".
+ * Unknown tokens, or a Foundry that is not ready yet, fall back to the token.
+ * @param {string} name     One of the rule selection names.
+ * @param {string[]} tokens
+ * @returns {string[]}
+ */
+export function ruleTokenLabels(name, tokens) {
+  const values = parseTokenList(tokens);
+  let labels = new Map();
+  try {
+    for (const group of RULE_GROUP_SOURCES[name]?.() ?? []) {
+      for (const option of group.options) {
+        const key = normalizeToken(option.value);
+        if (!labels.has(key)) labels.set(key, option.label);
+      }
+    }
+  } catch {
+    labels = new Map();
+  }
+  return values.map(value => labels.get(value) || value);
 }
 
 export function prepareRuleGroups(groups, selectedValues) {
@@ -220,10 +236,11 @@ export function prepareRuleGroups(groups, selectedValues) {
   }];
 }
 
-export function renderRuleMultiselect({ name, groups, selectedValues, placeholder }) {
+export function renderRuleMultiselect({ name, groups, selectedValues, placeholder, idPrefix = "wc" }) {
   const selected = new Set(parseTokenList(selectedValues));
   const allGroups = prepareRuleGroups(groups, selectedValues);
-  const panelId = `wc-${name}-options`;
+  // Several rules windows can be open at once; ids must not collide.
+  const panelId = `${idPrefix}-${name}-options`;
   const checkedAttr = value => selected.has(normalizeToken(value)) ? " checked" : "";
   const groupMarkup = allGroups.map((group, groupIndex) => {
     const groupKey = group.key ?? `group-${groupIndex}`;
@@ -254,7 +271,7 @@ export function renderRuleMultiselect({ name, groups, selectedValues, placeholde
   return `
     <div class="cr-multiselect" data-select="${escapeHtml(name)}" data-placeholder="${escapeHtml(placeholder)}">
       <div class="cr-combobox" role="combobox" tabindex="0" aria-haspopup="listbox"
-           aria-expanded="false" aria-controls="${panelId}">
+           aria-expanded="false" aria-controls="${escapeHtml(panelId)}">
         <div class="cr-selection" data-selection></div>
         <button type="button" class="cr-icon-button cr-select-clear" data-action="clearSelect"
                 data-select-name="${escapeHtml(name)}" aria-label="${escapeHtml(game.i18n.localize(`${MODULE_ID}.configDialog.actions.clear`))}"
@@ -266,7 +283,7 @@ export function renderRuleMultiselect({ name, groups, selectedValues, placeholde
           <i class="fas fa-chevron-down"></i>
         </button>
       </div>
-      <div id="${panelId}" class="cr-select-panel" role="listbox" aria-multiselectable="true"
+      <div id="${escapeHtml(panelId)}" class="cr-select-panel" role="listbox" aria-multiselectable="true"
            popover="manual" hidden>
         <div class="cr-select-toolbar">
           <label class="cr-search">

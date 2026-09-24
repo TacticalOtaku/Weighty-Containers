@@ -92,7 +92,9 @@ export function computeContentsCount(actor, containerId, {
 
 /**
  * Weight of everything inside a container, in pounds, with weight reductions
- * applied.
+ * applied. This is the number dnd5e's capacity bar shows - including for a
+ * container with `weightlessContents`, whose contents only stop counting for
+ * whatever holds it.
  *
  * The shape mirrors dnd5e's ContainerData#contentsWeight so the two never
  * disagree: children contribute their full total weight (a sub-container
@@ -130,11 +132,6 @@ export function computeAdjustedLoad(
   const memoMap = memo ?? new Map();
   const visitedIds = visited ?? new Set();
   const container = getItem(actor, containerId);
-
-  if (isWeightlessContainer(container)) {
-    return { load: 0, trace: [{ type: "weightless", id: containerId }] };
-  }
-
   const reduction = getReductionPct(container) / 100;
   const memoKey = `${containerId}|${includeNested}|${defaultUnit}`;
 
@@ -160,7 +157,12 @@ export function computeAdjustedLoad(
         type: "container-self",
         wLbs: ownLbs
       });
-      if (includeNested) {
+      // dnd5e's `weightlessContents` hides a sub-container's contents from
+      // whatever holds it (ContainerData#totalWeight), not from the
+      // sub-container's own capacity - so it is honoured here, one level up.
+      if (isWeightlessContainer(child)) {
+        trace.push({ child: child.name, id: child.id, type: "weightless" });
+      } else if (includeNested) {
         const nested = computeAdjustedLoad(actor, child.id, {
           includeNested,
           defaultUnit,
@@ -232,6 +234,7 @@ export function computeActorCarriedLbs(
     if (validateItem && !validateItem(item)) continue;
     if (isContainer(item)) {
       total += containerOwnWeightLbs(item, defaultUnit);
+      if (isWeightlessContainer(item)) continue;
       total += computeAdjustedLoad(actor, item.id, {
         includeNested,
         defaultUnit,
@@ -247,18 +250,32 @@ export function computeActorCarriedLbs(
   return Math.max(0, Number(total.toFixed(5)));
 }
 
-export function createProjectedActor(actor, candidateItem) {
+/**
+ * The actor as it would look after one item change.
+ *
+ * @param {Object} actor
+ * @param {Object} candidateItem  The changed or created item.
+ * @param {Object[]} [siblings]   Other items created in the same operation,
+ *                                e.g. a container's contents dropped with it.
+ */
+export function createProjectedActor(actor, candidateItem, siblings = []) {
+  const incoming = new Map();
+  for (const sibling of siblings) {
+    if (sibling?.id) incoming.set(sibling.id, sibling);
+  }
+  if (candidateItem?.id) incoming.set(candidateItem.id, candidateItem);
+
   const items = [];
-  let replaced = false;
   for (const item of actor?.items ?? []) {
-    if (item.id === candidateItem.id) {
-      items.push(candidateItem);
-      replaced = true;
+    if (incoming.has(item.id)) {
+      items.push(incoming.get(item.id));
+      incoming.delete(item.id);
     } else {
       items.push(item);
     }
   }
-  if (!replaced) items.push(candidateItem);
+  items.push(...incoming.values());
+  if (!candidateItem?.id) items.push(candidateItem);
   return { items: new ItemCollectionView(items) };
 }
 
@@ -287,7 +304,6 @@ export function findCapacityViolations(
 
   for (const projectedContainer of projectedActor?.items ?? []) {
     if (!isContainer(projectedContainer)) continue;
-    if (isWeightlessContainer(projectedContainer)) continue;
 
     const currentContainer = getItem(currentActor, projectedContainer.id);
     const countCapacity = getCapacityCount(projectedContainer);

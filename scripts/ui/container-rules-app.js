@@ -6,6 +6,7 @@ import {
 import { getRulePreset, listRulePresets } from "./rule-presets.js";
 import { clamp, num } from "../core/weight.js";
 import { notifyContainerRulesUpdated } from "../foundry/api.js";
+import { bypassOption } from "../foundry/enforcement.js";
 import { LOG } from "../foundry/logger.js";
 import {
   containerConfigMatches,
@@ -14,6 +15,7 @@ import {
   renderRuleMultiselect
 } from "./rule-presentation.js";
 import { ContainerRulesState } from "./container-rules-state.js";
+import { buildRuleTabs } from "./rule-tabs.js";
 import { ContainerRulesMultiselectController } from "./container-rules-multiselect.js";
 import {
   CONTAINER_RULES_WINDOW_SIZE,
@@ -21,6 +23,13 @@ import {
 } from "./window-position.js";
 
 const OPEN_CONTAINER_RULE_APPS = new Map();
+
+/** DOM-safe window id. The uuid keeps two unlinked tokens of one actor apart. */
+function rulesWindowId(containerItem) {
+  const key = containerItem.uuid
+    ?? `${containerItem.parent?.id ?? "world"}.${containerItem.id}`;
+  return `${MODULE_ID}-rules-${String(key).replace(/[^A-Za-z0-9_-]/g, "-")}`;
+}
 const ContainerRulesApplication = foundry.applications.api.HandlebarsApplicationMixin(
   foundry.applications.api.ApplicationV2
 );
@@ -74,7 +83,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
     const centeredPosition = getCenteredWindowPosition(window.innerWidth, window.innerHeight);
     super({
       ...options,
-      id: `${MODULE_ID}-rules-${containerItem.parent?.id ?? "world"}-${containerItem.id}`,
+      id: rulesWindowId(containerItem),
       position: { ...centeredPosition, ...options.position },
       window: { ...options.window, title }
     });
@@ -101,6 +110,44 @@ class ContainerRulesApp extends ContainerRulesApplication {
     this._closingAfterSave = false;
     this._listenersAbort = null;
     this._motionReady = false;
+    this._confirmingClose = null;
+    this._documentHooks = [];
+  }
+
+  /**
+   * Follow the container while the window is open: another GM may save rules
+   * for it, or it may be deleted outright.
+   */
+  _watchDocument() {
+    if (this._documentHooks.length) return;
+    const isThisItem = item => item?.uuid && item.uuid === this.containerItem?.uuid;
+    const onUpdate = (item, changes, options, userId) => {
+      if (!isThisItem(item)) return;
+      this.containerItem = item;
+      if (userId === game.user?.id || !foundry.utils.hasProperty(changes, `flags.${MODULE_ID}`)) return;
+      if (this._dirty) {
+        ui.notifications?.warn(game.i18n.format(`${MODULE_ID}.configDialog.changedElsewhere`, {
+          containerName: item.name
+        }));
+        return;
+      }
+      this.rules = ContainerRulesState.fromItem(item);
+      this.multiselect.rules = this.rules;
+      this._initialSnapshot = this.rules.snapshot();
+      this.render();
+    };
+    const onDelete = item => {
+      if (isThisItem(item)) this.close({ force: true });
+    };
+    this._documentHooks = [
+      ["updateItem", Hooks.on("updateItem", onUpdate)],
+      ["deleteItem", Hooks.on("deleteItem", onDelete)]
+    ];
+  }
+
+  _unwatchDocument() {
+    for (const [name, id] of this._documentHooks) Hooks.off(name, id);
+    this._documentHooks = [];
   }
 
   /**
@@ -175,30 +222,11 @@ class ContainerRulesApp extends ContainerRulesApplication {
 
   /** The tab bar. Presets are GM-only, so players get two tabs, not three. */
   _tabs() {
-    return [
-      {
-        id: "presets",
-        icon: "fas fa-wand-magic-sparkles",
-        label: game.i18n.localize(`${MODULE_ID}.presets.label`),
-        available: !this.readOnly
-      },
-      {
-        id: "restrictions",
-        icon: "fas fa-shield-halved",
-        label: game.i18n.localize(`${MODULE_ID}.configDialog.sections.restrictions`),
-        badge: "restrictions",
-        available: true
-      },
-      {
-        id: "properties",
-        icon: "fas fa-tags",
-        label: game.i18n.localize(`${MODULE_ID}.configDialog.sections.properties`),
-        badge: "properties",
-        available: true
-      }
-    ]
-      .filter(tab => tab.available)
-      .map(tab => ({ ...tab, active: tab.id === this.activeTab }));
+    return buildRuleTabs({
+      localize: key => game.i18n.localize(key),
+      readOnly: this.readOnly,
+      activeTab: this.activeTab
+    });
   }
 
   async _prepareContext(options) {
@@ -207,6 +235,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
     const preview = this._previewBasis();
     return {
       ...context,
+      idPrefix: this.id,
       containerName: this.containerItem.name,
       readOnly: this.readOnly,
       themeOptions: ["auto", "light", "dark"].map(value => ({
@@ -231,24 +260,28 @@ class ContainerRulesApp extends ContainerRulesApplication {
       modeAny: this.rules.propertyMatchMode === "any",
       allowedTypesSelect: renderRuleMultiselect({
         name: "allowedTypes",
+        idPrefix: this.id,
         groups: this.rules.catalogs.allowedTypes,
         selectedValues: this.rules.allowedTypes,
         placeholder: game.i18n.localize(`${MODULE_ID}.configDialog.anyTypes`)
       }),
       allowedSubtypesSelect: renderRuleMultiselect({
         name: "allowedSubtypes",
+        idPrefix: this.id,
         groups: this.rules.catalogs.allowedSubtypes,
         selectedValues: this.rules.allowedSubtypes,
         placeholder: game.i18n.localize(`${MODULE_ID}.configDialog.anySubtypes`)
       }),
       requiredPropertiesSelect: renderRuleMultiselect({
         name: "requiredProperties",
+        idPrefix: this.id,
         groups: propertyGroups,
         selectedValues: this.rules.requiredProperties,
         placeholder: game.i18n.localize(`${MODULE_ID}.configDialog.anyProperties`)
       }),
       forbiddenPropertiesSelect: renderRuleMultiselect({
         name: "forbiddenProperties",
+        idPrefix: this.id,
         groups: this.rules.catalogs.forbiddenProperties,
         selectedValues: this.rules.forbiddenProperties,
         placeholder: game.i18n.localize(`${MODULE_ID}.configDialog.anyProperties`)
@@ -258,6 +291,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
 
   async _onRender(context, options) {
     await super._onRender(context, options);
+    this._watchDocument();
     const renderedElement = this.element;
     this._motionReady = false;
     renderedElement.classList.remove("cr-ready");
@@ -306,7 +340,9 @@ class ContainerRulesApp extends ContainerRulesApplication {
   async close(options = {}) {
     const force = typeof options === "boolean" ? options : options?.force;
     if (this._dirty && !force && !this._closingAfterSave) {
-      const confirmed = await foundry.applications.api.DialogV2.confirm({
+      // Escape, the header X and Cancel can all ask at once; one question is enough.
+      if (this._confirmingClose) return this;
+      this._confirmingClose = foundry.applications.api.DialogV2.confirm({
         classes: ["anvil", "wc-confirm"],
         render: (_event, dialog) => {
           // Share the client preference with the module's secondary window.
@@ -323,9 +359,16 @@ class ContainerRulesApp extends ContainerRulesApplication {
         no: { label: game.i18n.localize(`${MODULE_ID}.configDialog.unsaved.continue`) },
         rejectClose: false
       });
+      let confirmed;
+      try {
+        confirmed = await this._confirmingClose;
+      } finally {
+        this._confirmingClose = null;
+      }
       if (!confirmed) return this;
     }
     this._listenersAbort?.abort();
+    this._unwatchDocument();
     return super.close(options);
   }
 
@@ -338,27 +381,33 @@ class ContainerRulesApp extends ContainerRulesApplication {
   }
 
   static _clearSelect(event, target) {
+    if (this.readOnly) return;
     this.multiselect.setSelection(target.dataset.selectName, []);
   }
 
   static _selectVisible(event, target) {
+    if (this.readOnly) return;
     this.multiselect.bulkVisible(target.dataset.selectName, true);
   }
 
   static _deselectVisible(event, target) {
+    if (this.readOnly) return;
     this.multiselect.bulkVisible(target.dataset.selectName, false);
   }
 
   static _removeSelection(event, target) {
+    if (this.readOnly) return;
     const name = target.dataset.selectName;
     this.multiselect.removeSelection(name, target.dataset.token);
   }
 
   static _removeUnavailable() {
+    if (this.readOnly) return;
     this.multiselect.removeUnavailableSubtypes();
   }
 
   static _resolveConflict(event, target) {
+    if (this.readOnly) return;
     this.multiselect.resolvePropertyConflicts(target.dataset.keep);
   }
 
@@ -407,15 +456,16 @@ class ContainerRulesApp extends ContainerRulesApplication {
     if (!this.readOnly) return;
     this.element.classList.add("cr-readonly");
     // The tab bar, the theme switch and Close all stay live — a player still
-    // needs to read every pane and shut the window.
+    // needs to read every pane and shut the window. The lists stay openable
+    // and searchable too, so a selection past the third chip can be read.
+    const viewing = "[data-select-search], .cr-select-toggle, [data-action='showUnavailable']";
     for (const control of this.element.querySelectorAll(
       ".cr-hero input, .cr-panes input, .cr-panes button"
     )) {
-      control.disabled = true;
+      if (!control.matches(viewing)) control.disabled = true;
     }
     for (const combo of this.element.querySelectorAll(".cr-combobox")) {
-      combo.setAttribute("aria-disabled", "true");
-      combo.setAttribute("tabindex", "-1");
+      combo.setAttribute("aria-readonly", "true");
     }
     this.element.querySelector("[data-save-button]")?.remove();
   }
@@ -454,6 +504,17 @@ class ContainerRulesApp extends ContainerRulesApplication {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
       event.preventDefault();
       this.submit();
+      return;
+    }
+
+    // The window is a <form>: Enter in the search box or the % field would
+    // otherwise submit it, saving and closing mid-edit. Saving is the button
+    // or Ctrl+S; Enter in the percentage just commits the typed value.
+    if (event.key === "Enter" && event.target.matches?.('input:not([type="checkbox"]):not([type="radio"])')) {
+      event.preventDefault();
+      if (event.target.matches('[name="reductionPct"]')) {
+        event.target.dispatchEvent(new Event("input", { bubbles: true }));
+      }
       return;
     }
 
@@ -577,9 +638,10 @@ class ContainerRulesApp extends ContainerRulesApplication {
     if (!this.window?.header || this.window.header.querySelector(".cr-dirty-state")) return;
     const indicator = document.createElement("span");
     indicator.className = "cr-dirty-state";
-    indicator.innerHTML = `<i class="fas fa-circle" aria-hidden="true"></i> ${escapeHtml(
+    indicator.innerHTML = `<i class="fas fa-circle" aria-hidden="true"></i><span>${escapeHtml(
       game.i18n.localize(`${MODULE_ID}.configDialog.changed`)
-    )}`;
+    )}</span>`;
+    indicator.title = game.i18n.localize(`${MODULE_ID}.configDialog.changed`);
     indicator.hidden = true;
     this.window.header.insertBefore(indicator, this.window.controls ?? this.window.close);
   }
@@ -653,7 +715,9 @@ class ContainerRulesApp extends ContainerRulesApplication {
 
     try {
       const currentItem = this.containerItem.parent?.items?.get(this.containerItem.id) ?? this.containerItem;
-      await currentItem.update(makeContainerConfigUpdate(config));
+      // A GM editing rules must not be stopped by the rules: lowering a full
+      // bag's reduction is a legitimate change, not an item being stuffed in.
+      await currentItem.update(makeContainerConfigUpdate(config), bypassOption());
       const persistedItem = currentItem.parent?.items?.get(currentItem.id) ?? currentItem;
       if (!containerConfigMatches(persistedItem, config)) {
         throw new Error("Container configuration update completed without persisting the requested flags");
@@ -689,6 +753,7 @@ export async function openReductionDialog(containerItem, options = {}) {
   const key = containerItem.uuid ?? `${containerItem.parent?.id}.${containerItem.id}`;
   const existing = OPEN_CONTAINER_RULE_APPS.get(key);
   if (existing?.rendered) {
+    if (existing.minimized) await existing.maximize();
     existing.bringToFront();
     return existing;
   }

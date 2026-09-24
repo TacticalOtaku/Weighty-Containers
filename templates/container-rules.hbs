@@ -64,8 +64,8 @@
        aria-label="{{localize 'weighty-containers.configDialog.navigation'}}">
     {{#each tabs}}
     <button type="button" class="cr-tab{{#if this.active}} is-active{{/if}}"
-            role="tab" id="cr-tab-{{this.id}}"
-            aria-selected="{{this.active}}" aria-controls="cr-pane-{{this.id}}"
+            role="tab" id="{{@root.idPrefix}}-tab-{{this.id}}"
+            aria-selected="{{this.active}}" aria-controls="{{@root.idPrefix}}-pane-{{this.id}}"
             data-action="selectTab" data-tab="{{this.id}}">
       <i class="{{this.icon}}" aria-hidden="true"></i>
       <span>{{this.label}}</span>
@@ -80,8 +80,8 @@
   <div class="cr-panes anvil-scroll">
 
     {{#if presets}}
-    <section class="cr-pane" data-tab="presets" role="tabpanel"
-             aria-labelledby="cr-tab-presets" tabindex="0">
+    <section class="cr-pane" data-tab="presets" role="tabpanel" id="{{idPrefix}}-pane-presets"
+             aria-labelledby="{{idPrefix}}-tab-presets" tabindex="0">
       <p class="cr-pane-lede">{{localize "weighty-containers.presets.hint"}}</p>
       <div class="cr-preset-grid">
         {{#each presets}}
@@ -98,8 +98,8 @@
     </section>
     {{/if}}
 
-    <section class="cr-pane" data-tab="restrictions" role="tabpanel"
-             aria-labelledby="cr-tab-restrictions" tabindex="0">
+    <section class="cr-pane" data-tab="restrictions" role="tabpanel" id="{{idPrefix}}-pane-restrictions"
+             aria-labelledby="{{idPrefix}}-tab-restrictions" tabindex="0">
       <div class="cr-field">
         <div class="cr-field-label">
           {{localize "weighty-containers.configDialog.allowedTypes.label"}}
@@ -129,8 +129,8 @@
       </div>
     </section>
 
-    <section class="cr-pane" data-tab="properties" role="tabpanel"
-             aria-labelledby="cr-tab-properties" tabindex="0">
+    <section class="cr-pane" data-tab="properties" role="tabpanel" id="{{idPrefix}}-pane-properties"
+             aria-labelledby="{{idPrefix}}-tab-properties" tabindex="0">
       <div class="cr-duo">
         <div class="cr-field cr-field-positive">
           <div class="cr-field-label">
