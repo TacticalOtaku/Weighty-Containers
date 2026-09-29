@@ -1,4 +1,4 @@
-import { LOG_LEVELS, MODULE_ID } from "../constants.js";
+import { LOG_LEVELS, I18N, MODULE_ID } from "../constants.js";
 import { convertWeightToLbs, lbsToUnit } from "../core/units.js";
 import { getReductionPct, isContainer, num } from "../core/weight.js";
 import {
@@ -21,56 +21,60 @@ export function registerModuleSettings(logger) {
     // raw keys. Foundry localizes setting names, hints and choice labels when
     // it renders the settings form, so hand it keys and let it do that.
     game.settings.register(MODULE_ID, "enforceMode", {
-      name: `${MODULE_ID}.enforceMode.name`,
-      hint: `${MODULE_ID}.enforceMode.hint`,
+      name: `${I18N}.enforceMode.name`,
+      hint: `${I18N}.enforceMode.hint`,
       scope: "world",
       config: true,
       restricted: true,
       type: String,
       choices: {
-        block: `${MODULE_ID}.enforceMode.block`,
-        warn: `${MODULE_ID}.enforceMode.warn`
+        block: `${I18N}.enforceMode.block`,
+        warn: `${I18N}.enforceMode.warn`
       },
       default: "block"
     });
     game.settings.register(MODULE_ID, "includeNested", {
-      name: `${MODULE_ID}.includeNested.name`,
-      hint: `${MODULE_ID}.includeNested.hint`,
+      name: `${I18N}.includeNested.name`,
+      hint: `${I18N}.includeNested.hint`,
       scope: "world",
       config: true,
       restricted: true,
       type: Boolean,
       default: true,
-      // Container sheets read the setting when they draw the capacity bar.
+      // This setting changes the weight model itself, so it is not enough to
+      // redraw the container sheets that read it. Actor encumbrance is derived
+      // data: without a reset it keeps the old total until something else
+      // happens to re-prepare the actor.
       onChange: () => {
+        refreshPreparedActors(logger);
         for (const app of foundry.applications?.instances?.values() ?? []) {
           if (app.document?.type === "container" && app.rendered) app.render();
         }
       }
     });
     game.settings.register(MODULE_ID, "notifyScope", {
-      name: `${MODULE_ID}.notifyScope.name`,
-      hint: `${MODULE_ID}.notifyScope.hint`,
+      name: `${I18N}.notifyScope.name`,
+      hint: `${I18N}.notifyScope.hint`,
       scope: "world",
       config: true,
       restricted: true,
       type: String,
       choices: Object.fromEntries(NOTIFY_SCOPES.map(scope => [
         scope,
-        `${MODULE_ID}.notifyScope.${scope}`
+        `${I18N}.notifyScope.${scope}`
       ])),
       default: "selfAndGm"
     });
     game.settings.register(MODULE_ID, "theme", {
-      name: `${MODULE_ID}.theme.name`,
-      hint: `${MODULE_ID}.theme.hint`,
+      name: `${I18N}.theme.name`,
+      hint: `${I18N}.theme.hint`,
       scope: "client",
       config: true,
       restricted: false,
       type: String,
       choices: Object.fromEntries(THEMES.map(theme => [
         theme,
-        `${MODULE_ID}.theme.${theme}`
+        `${I18N}.theme.${theme}`
       ])),
       default: "auto",
       onChange: () => {
@@ -80,22 +84,22 @@ export function registerModuleSettings(logger) {
       }
     });
     game.settings.register(MODULE_ID, "logLevel", {
-      name: `${MODULE_ID}.logLevel.name`,
-      hint: `${MODULE_ID}.logLevel.hint`,
+      name: `${I18N}.logLevel.name`,
+      hint: `${I18N}.logLevel.hint`,
       scope: "client",
       config: true,
       restricted: false,
       type: String,
       choices: Object.fromEntries(LOG_LEVELS.map(level => [
         level,
-        `${MODULE_ID}.logLevel.${level}`
+        `${I18N}.logLevel.${level}`
       ])),
       default: "warn",
       onChange: value => logger.setLevel(value)
     });
     game.settings.register(MODULE_ID, "logStacks", {
-      name: `${MODULE_ID}.logStacks.name`,
-      hint: `${MODULE_ID}.logStacks.hint`,
+      name: `${I18N}.logStacks.name`,
+      hint: `${I18N}.logStacks.hint`,
       scope: "client",
       config: true,
       restricted: false,
@@ -104,8 +108,8 @@ export function registerModuleSettings(logger) {
       onChange: value => { logger.withStacks = value; }
     });
     game.settings.register(MODULE_ID, "logBufferLimit", {
-      name: `${MODULE_ID}.logBufferLimit.name`,
-      hint: `${MODULE_ID}.logBufferLimit.hint`,
+      name: `${I18N}.logBufferLimit.name`,
+      hint: `${I18N}.logBufferLimit.hint`,
       scope: "client",
       config: true,
       restricted: false,
@@ -117,8 +121,8 @@ export function registerModuleSettings(logger) {
     // it has to be the GM's text, not whatever the acting player typed into
     // their own client settings.
     game.settings.register(MODULE_ID, "exceedMessageText", {
-      name: `${MODULE_ID}.exceedMessageText.name`,
-      hint: `${MODULE_ID}.exceedMessageText.hint`,
+      name: `${I18N}.exceedMessageText.name`,
+      hint: `${I18N}.exceedMessageText.hint`,
       scope: "world",
       config: true,
       restricted: true,
@@ -133,7 +137,9 @@ export function registerModuleSettings(logger) {
         0,
         num(game.settings.get(MODULE_ID, "logBufferLimit"), 500)
       );
-    } catch {}
+    } catch {
+      // Logging settings are optional here: the logger keeps its defaults.
+    }
     logger.info("init complete");
   });
 }
@@ -308,7 +314,7 @@ export function refreshPreparedActors(logger) {
   }
   for (const token of game.scenes?.contents?.flatMap(scene => scene.tokens.contents) ?? []) {
     if (token.actorLink || !token.actor) continue;
-    try { token.actor.reset(); } catch {}
+    try { token.actor.reset(); } catch { /* one broken synthetic actor must not stop the others */ }
   }
   logger.info("refreshed prepared actors", { refreshed });
   return refreshed;

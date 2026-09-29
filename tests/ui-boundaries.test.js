@@ -16,7 +16,7 @@ test("rule presentation exposes saved-value group preparation", async () => {
     groups[0],
     {
       key: "savedValues",
-      label: "weighty-containers.configDialog.groups.savedValues",
+      label: "WC.configDialog.groups.savedValues",
       options: [{ value: "custom", label: "custom" }],
       saved: true,
       types: []
@@ -37,6 +37,11 @@ test("container rules window starts centered at its intended size", async () => 
 
 test("public dialog opener returns a rendered and centered ApplicationV2", async () => {
   class ApplicationV2 {
+    // Real ApplicationV2 declares tabGroups as a class field seeded from
+    // `static TABS`, before any subclass constructor body runs.
+    tabGroups = Object.entries(this.constructor.TABS ?? {})
+      .reduce((groups, [id, { initial }]) => Object.assign(groups, { [id]: initial ?? null }), {});
+
     constructor(options) {
       this.id = options.id;
       this.position = options.position;
@@ -45,7 +50,7 @@ test("public dialog opener returns a rendered and centered ApplicationV2", async
 
     addEventListener() {}
 
-    async render(options) {
+    async render() {
       this.rendered = true;
       return this;
     }

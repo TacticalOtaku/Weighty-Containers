@@ -1,4 +1,4 @@
-import { MODULE_ID, PREVIEW_BASE_WEIGHT } from "../constants.js";
+import { I18N, MODULE_ID, PREVIEW_BASE_WEIGHT } from "../constants.js";
 import {
   getRawContentsWeight,
   getWeightUnitLabel
@@ -15,7 +15,7 @@ import {
   renderRuleMultiselect
 } from "./rule-presentation.js";
 import { ContainerRulesState } from "./container-rules-state.js";
-import { buildRuleTabs } from "./rule-tabs.js";
+import { RULE_TAB_GROUP, RULE_TABS, ruleTabsConfig } from "./rule-tabs.js";
 import { ContainerRulesMultiselectController } from "./container-rules-multiselect.js";
 import {
   CONTAINER_RULES_WINDOW_SIZE,
@@ -42,7 +42,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
     tag: "form",
     position: { ...CONTAINER_RULES_WINDOW_SIZE },
     window: {
-      icon: "fas fa-gear",
+      icon: "fa-solid fa-gear",
       minimizable: true,
       resizable: true
     },
@@ -68,18 +68,29 @@ class ContainerRulesApp extends ContainerRulesApplication {
 
   /** Presentation only — icons for the three theme choices. */
   static THEME_ICONS = {
-    auto: "fas fa-circle-half-stroke",
-    light: "fas fa-sun",
-    dark: "fas fa-moon"
+    auto: "fa-solid fa-circle-half-stroke",
+    light: "fa-solid fa-sun",
+    dark: "fa-solid fa-moon"
   };
 
   static PARTS = {
-    content: { template: `modules/${MODULE_ID}/templates/container-rules.hbs` },
+    content: {
+      template: `modules/${MODULE_ID}/templates/container-rules.hbs`,
+      // The window re-renders while it is open (another GM saving rules for
+      // this container), and derived data is rebuilt each time. Naming the
+      // scroller here lets Foundry put the pane back where the user left it.
+      scrollable: [".cr-panes"]
+    },
     footer: { template: `modules/${MODULE_ID}/templates/container-rules-footer.hbs` }
   };
 
+  /** Tab configuration consumed by ApplicationV2's own tab machinery. */
+  static TABS = {
+    [RULE_TAB_GROUP]: { tabs: [...RULE_TABS], initial: RULE_TABS[0].id }
+  };
+
   constructor(containerItem, options = {}) {
-    const title = game.i18n.localize(`${MODULE_ID}.configDialog.title`);
+    const title = game.i18n.localize(`${I18N}.configDialog.title`);
     const centeredPosition = getCenteredWindowPosition(window.innerWidth, window.innerHeight);
     super({
       ...options,
@@ -91,6 +102,11 @@ class ContainerRulesApp extends ContainerRulesApplication {
     // Players who own the actor may look at the rules that just rejected their
     // item; only a GM may change them.
     this.readOnly = options.readOnly ?? !game.user?.isGM;
+    // ApplicationV2 seeds tabGroups from `static TABS` in a class field
+    // initialiser, which runs before this body and cannot know who is looking.
+    // Left alone, a player's window opens on the GM-only presets tab, which is
+    // not in their DOM — so no pane is active and the window renders blank.
+    this.tabGroups[RULE_TAB_GROUP] = ruleTabsConfig({ readOnly: this.readOnly }).initial;
     this.rules = ContainerRulesState.fromItem(containerItem);
     this.multiselect = new ContainerRulesMultiselectController({
       rules: this.rules,
@@ -102,14 +118,12 @@ class ContainerRulesApp extends ContainerRulesApplication {
       }
     });
     this._initialSnapshot = this.rules.snapshot();
-    // Presets are the first thing a GM reaches for and the one thing a player
-    // cannot use, so the opening pane differs by role.
-    this.activeTab = this.readOnly ? "restrictions" : "presets";
     this._dirty = false;
     this._hasErrors = false;
     this._closingAfterSave = false;
     this._listenersAbort = null;
     this._motionReady = false;
+    this._paneScroll = 0;
     this._confirmingClose = null;
     this._documentHooks = [];
   }
@@ -126,7 +140,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
       this.containerItem = item;
       if (userId === game.user?.id || !foundry.utils.hasProperty(changes, `flags.${MODULE_ID}`)) return;
       if (this._dirty) {
-        ui.notifications?.warn(game.i18n.format(`${MODULE_ID}.configDialog.changedElsewhere`, {
+        ui.notifications?.warn(game.i18n.format(`${I18N}.configDialog.changedElsewhere`, {
           containerName: item.name
         }));
         return;
@@ -220,13 +234,20 @@ class ContainerRulesApp extends ContainerRulesApplication {
     return bits.join(" · ");
   }
 
-  /** The tab bar. Presets are GM-only, so players get two tabs, not three. */
-  _tabs() {
-    return buildRuleTabs({
-      localize: key => game.i18n.localize(key),
-      readOnly: this.readOnly,
-      activeTab: this.activeTab
-    });
+  /**
+   * Presets are GM-only, so a player's window has two tabs, not three.
+   *
+   * This is an instance method on ApplicationV2 precisely so it can vary per
+   * viewer; `static TABS` alone cannot know who is looking.
+   */
+  _getTabsConfig(group) {
+    if (group !== RULE_TAB_GROUP) return super._getTabsConfig(group);
+    return ruleTabsConfig({ readOnly: this.readOnly });
+  }
+
+  /** The tab currently shown, as ApplicationV2 records it. */
+  get activeTab() {
+    return this.tabGroups[RULE_TAB_GROUP];
   }
 
   async _prepareContext(options) {
@@ -241,7 +262,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
       themeOptions: ["auto", "light", "dark"].map(value => ({
         value,
         icon: ContainerRulesApp.THEME_ICONS[value],
-        label: game.i18n.localize(`${MODULE_ID}.theme.${value}`),
+        label: game.i18n.localize(`${I18N}.theme.${value}`),
         active: this.theme === value
       })),
       presets: this.readOnly ? [] : listRulePresets().map(preset => ({
@@ -250,7 +271,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
         label: game.i18n.localize(preset.label),
         summary: this._describePreset(preset.config)
       })),
-      tabs: this._tabs(),
+      tabs: this._prepareTabs(RULE_TAB_GROUP),
       reductionPct: this.rules.reductionPct,
       previewUnit: preview.unit,
       previewIsActual: preview.actual,
@@ -263,28 +284,28 @@ class ContainerRulesApp extends ContainerRulesApplication {
         idPrefix: this.id,
         groups: this.rules.catalogs.allowedTypes,
         selectedValues: this.rules.allowedTypes,
-        placeholder: game.i18n.localize(`${MODULE_ID}.configDialog.anyTypes`)
+        placeholder: game.i18n.localize(`${I18N}.configDialog.anyTypes`)
       }),
       allowedSubtypesSelect: renderRuleMultiselect({
         name: "allowedSubtypes",
         idPrefix: this.id,
         groups: this.rules.catalogs.allowedSubtypes,
         selectedValues: this.rules.allowedSubtypes,
-        placeholder: game.i18n.localize(`${MODULE_ID}.configDialog.anySubtypes`)
+        placeholder: game.i18n.localize(`${I18N}.configDialog.anySubtypes`)
       }),
       requiredPropertiesSelect: renderRuleMultiselect({
         name: "requiredProperties",
         idPrefix: this.id,
         groups: propertyGroups,
         selectedValues: this.rules.requiredProperties,
-        placeholder: game.i18n.localize(`${MODULE_ID}.configDialog.anyProperties`)
+        placeholder: game.i18n.localize(`${I18N}.configDialog.anyProperties`)
       }),
       forbiddenPropertiesSelect: renderRuleMultiselect({
         name: "forbiddenProperties",
         idPrefix: this.id,
         groups: this.rules.catalogs.forbiddenProperties,
         selectedValues: this.rules.forbiddenProperties,
-        placeholder: game.i18n.localize(`${MODULE_ID}.configDialog.anyProperties`)
+        placeholder: game.i18n.localize(`${I18N}.configDialog.anyProperties`)
       })
     };
   }
@@ -303,8 +324,11 @@ class ContainerRulesApp extends ContainerRulesApplication {
     this.element.addEventListener("click", event => this._onLocalClick(event), { signal });
     this.element.addEventListener("input", event => this._onInput(event), { signal });
     this.element.addEventListener("keydown", event => this._onKeyDown(event), { signal });
-    this.element.querySelector(".cr-panes")?.addEventListener("scroll", () => {
+    this.element.querySelector(".cr-panes")?.addEventListener("scroll", event => {
       this.multiselect.closeAll();
+      // Remembered here rather than read back after a render: by then Foundry
+      // has already clamped it against content that is still being drawn.
+      this._paneScroll = event.currentTarget.scrollTop;
     }, { signal, passive: true });
     document.addEventListener("pointerdown", event => {
       if (!this.element?.contains(event.target)) this.multiselect.closeAll();
@@ -321,6 +345,16 @@ class ContainerRulesApp extends ContainerRulesApplication {
     this._installDirtyIndicator();
     this._refreshAll();
     this._applyReadOnly();
+
+    // PARTS.content.scrollable restores the pane before this method runs, which
+    // covers the common case. It cannot cover this one: _refreshAll draws the
+    // selection chips just above, so at restore time the pane was shorter than
+    // it now is and the position was clamped to fit. Re-assert the value we
+    // recorded while the user was actually scrolling.
+    const panes = this.element.querySelector(".cr-panes");
+    if (panes && this._paneScroll && panes.scrollTop !== this._paneScroll) {
+      panes.scrollTop = this._paneScroll;
+    }
     requestAnimationFrame(() => {
       if (this.element !== renderedElement || !renderedElement.isConnected) return;
       renderedElement.classList.add("cr-ready");
@@ -353,10 +387,10 @@ class ContainerRulesApp extends ContainerRulesApplication {
           };
           dialog.applyAnvilTheme();
         },
-        window: { title: game.i18n.localize(`${MODULE_ID}.configDialog.unsaved.title`) },
-        content: `<p>${escapeHtml(game.i18n.localize(`${MODULE_ID}.configDialog.unsaved.message`))}</p>`,
-        yes: { label: game.i18n.localize(`${MODULE_ID}.configDialog.unsaved.discard`) },
-        no: { label: game.i18n.localize(`${MODULE_ID}.configDialog.unsaved.continue`) },
+        window: { title: game.i18n.localize(`${I18N}.configDialog.unsaved.title`) },
+        content: `<p>${escapeHtml(game.i18n.localize(`${I18N}.configDialog.unsaved.message`))}</p>`,
+        yes: { label: game.i18n.localize(`${I18N}.configDialog.unsaved.discard`) },
+        no: { label: game.i18n.localize(`${I18N}.configDialog.unsaved.continue`) },
         rejectClose: false
       });
       let confirmed;
@@ -372,11 +406,11 @@ class ContainerRulesApp extends ContainerRulesApplication {
     return super.close(options);
   }
 
-  static async _onSubmit(event, form, formData) {
+  static async _onSubmit() {
     await this._save();
   }
 
-  static _cancel(event, target) {
+  static _cancel() {
     return this.close();
   }
 
@@ -446,7 +480,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
     );
     if (mode) mode.checked = true;
     this._refreshAll();
-    ui.notifications?.info(game.i18n.format(`${MODULE_ID}.presets.applied`, {
+    ui.notifications?.info(game.i18n.format(`${I18N}.presets.applied`, {
       preset: game.i18n.localize(preset.label)
     }));
   }
@@ -566,10 +600,10 @@ class ContainerRulesApp extends ContainerRulesApplication {
       if (!error) continue;
       error.hidden = !this._hasErrors;
       if (this._hasErrors) {
-        error.innerHTML = `${escapeHtml(game.i18n.format(`${MODULE_ID}.configDialog.propertyConflict`, {
+        error.innerHTML = `${escapeHtml(game.i18n.format(`${I18N}.configDialog.propertyConflict`, {
           properties: labels.join(", ")
         }))} <button type="button" data-action="resolveConflict" data-keep="${name}">${escapeHtml(
-          game.i18n.localize(`${MODULE_ID}.configDialog.actions.moveHere`)
+          game.i18n.localize(`${I18N}.configDialog.actions.moveHere`)
         )}</button>`;
       }
     }
@@ -577,7 +611,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
     if (save) {
       save.disabled = this._hasErrors;
       save.querySelector("span").textContent = game.i18n.localize(
-        `${MODULE_ID}.configDialog.${this._hasErrors ? "fixErrors" : "save"}`
+        `${I18N}.configDialog.${this._hasErrors ? "fixErrors" : "save"}`
       );
     }
   }
@@ -638,10 +672,10 @@ class ContainerRulesApp extends ContainerRulesApplication {
     if (!this.window?.header || this.window.header.querySelector(".cr-dirty-state")) return;
     const indicator = document.createElement("span");
     indicator.className = "cr-dirty-state";
-    indicator.innerHTML = `<i class="fas fa-circle" aria-hidden="true"></i><span>${escapeHtml(
-      game.i18n.localize(`${MODULE_ID}.configDialog.changed`)
+    indicator.innerHTML = `<i class="fa-solid fa-circle" aria-hidden="true"></i><span>${escapeHtml(
+      game.i18n.localize(`${I18N}.configDialog.changed`)
     )}</span>`;
-    indicator.title = game.i18n.localize(`${MODULE_ID}.configDialog.changed`);
+    indicator.title = game.i18n.localize(`${I18N}.configDialog.changed`);
     indicator.hidden = true;
     this.window.header.insertBefore(indicator, this.window.controls ?? this.window.close);
   }
@@ -669,32 +703,36 @@ class ContainerRulesApp extends ContainerRulesApplication {
    * repainting three buttons.
    */
   _selectTab(name, { focus = true } = {}) {
-    const panes = Array.from(this.element.querySelectorAll(".cr-pane"));
-    const tabs = Array.from(this.element.querySelectorAll(".cr-tab"));
-    if (!panes.length) return;
+    const group = RULE_TAB_GROUP;
+    const nav = this.element?.querySelector(
+      `.tabs [data-group="${group}"][data-tab="${name}"]`
+    );
+    // changeTab throws when the tab is not in the DOM, which is the normal
+    // case for a player asked to show the GM-only presets pane.
+    if (!nav) return;
 
-    const target = panes.some(pane => pane.dataset.tab === name)
-      ? name
-      : panes[0].dataset.tab;
-    this.activeTab = target;
+    this.changeTab(name, group, { force: true });
 
-    for (const pane of panes) pane.classList.toggle("is-active", pane.dataset.tab === target);
-    for (const tab of tabs) {
-      const active = tab.dataset.tab === target;
-      tab.classList.toggle("is-active", active);
+    // Core marks the nav with aria-pressed; these are role="tab" buttons, so
+    // they need aria-selected and a single tab stop in the bar.
+    for (const tab of this.element.querySelectorAll(`.cr-tab[data-group="${group}"]`)) {
+      const active = tab.dataset.tab === name;
       tab.setAttribute("aria-selected", String(active));
       tab.tabIndex = active ? 0 : -1;
     }
 
     this.multiselect.closeAll();
     this._positionTabMarker();
-    const pane = panes.find(entry => entry.dataset.tab === target);
-    if (focus) pane?.querySelector("input, .cr-combobox, button")?.focus({ preventScroll: true });
+    if (!focus) return;
+    this.element
+      .querySelector(`.cr-pane[data-tab="${name}"]`)
+      ?.querySelector("input, .cr-combobox, button")
+      ?.focus({ preventScroll: true });
   }
 
   _positionTabMarker() {
     const marker = this.element.querySelector(".cr-tab-marker");
-    const active = this.element.querySelector(".cr-tab.is-active");
+    const active = this.element.querySelector(".cr-tab.active");
     if (!marker || !active) return;
     const bar = active.parentElement.getBoundingClientRect();
     const rect = active.getBoundingClientRect();
@@ -730,7 +768,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
         config,
         error
       });
-      ui.notifications?.error(game.i18n.localize(`${MODULE_ID}.configDialog.saveFailed`));
+      ui.notifications?.error(game.i18n.localize(`${I18N}.configDialog.saveFailed`));
       return;
     }
 
@@ -738,7 +776,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
     this._dirty = false;
     this._closingAfterSave = true;
     notifyContainerRulesUpdated(this.containerItem, config);
-    ui.notifications?.info(game.i18n.format(`${MODULE_ID}.configSet.notification`, {
+    ui.notifications?.info(game.i18n.format(`${I18N}.configSet.notification`, {
       containerName: this.containerItem.name
     }));
     await this.close({ force: true });
@@ -747,7 +785,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
 
 export async function openReductionDialog(containerItem, options = {}) {
   if (!containerItem) {
-    ui.notifications?.error(game.i18n.localize(`${MODULE_ID}.reductionDialog.errorNoItem`));
+    ui.notifications?.error(game.i18n.localize(`${I18N}.reductionDialog.errorNoItem`));
     return;
   }
   const key = containerItem.uuid ?? `${containerItem.parent?.id}.${containerItem.id}`;

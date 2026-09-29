@@ -82,7 +82,12 @@ test("a container's reduction reaches items in its sub-containers", () => {
   assert.equal(computeActorCarriedLbs(subject), 7.5);
 });
 
-test("dnd5e's weightlessContents property empties a container's load", () => {
+// dnd5e applies `weightlessContents` in exactly one place: ContainerData
+// #totalWeight, which is what a *parent* sees. #contentsWeight — and therefore
+// computeCapacity() and the capacity bar — ignores the property entirely. So
+// the contents still fill the bag's own gauge; they just stop weighing on
+// whatever carries the bag.
+test("weightlessContents hides contents from the carrier, not from the bag's own gauge", () => {
   const bag = item({
     id: "bag",
     type: "container",
@@ -93,7 +98,32 @@ test("dnd5e's weightlessContents property empties a container's load", () => {
   const subject = actor([bag, anvil]);
 
   assert.equal(isWeightlessContainer(bag), true);
-  assert.equal(computeAdjustedLoad(subject, "bag").load, 0);
+  assert.equal(
+    computeAdjustedLoad(subject, "bag").load,
+    200,
+    "the bag's own capacity gauge still counts what is inside it"
+  );
+  assert.equal(
+    computeActorCarriedLbs(subject),
+    5,
+    "the actor carries the bag's own weight and nothing that is in it"
+  );
+});
+
+test("a weightless sub-container contributes only its own weight to its parent", () => {
+  const outer = item({ id: "outer", type: "container", weight: 2 });
+  const inner = item({
+    id: "inner",
+    type: "container",
+    container: "outer",
+    weight: 3,
+    properties: ["weightlessContents"]
+  });
+  const anvil = item({ id: "anvil", container: "inner", weight: 200 });
+  const subject = actor([outer, inner, anvil]);
+
+  assert.equal(computeAdjustedLoad(subject, "outer").load, 3);
+  assert.equal(computeAdjustedLoad(subject, "inner").load, 200);
   assert.equal(computeActorCarriedLbs(subject), 5);
 });
 

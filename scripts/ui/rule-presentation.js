@@ -1,4 +1,4 @@
-import { MODULE_ID } from "../constants.js";
+import { I18N, MODULE_ID } from "../constants.js";
 import {
   getContainerRestrictions,
   normalizeToken,
@@ -103,7 +103,7 @@ export function getRuleItemTypeGroups() {
   const options = Array.from(itemTypes, ([value, label]) => ({ value, label }))
     .sort((a, b) => a.label.localeCompare(b.label, game.i18n.lang));
 
-  return [{ label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.itemTypes`), options }];
+  return [{ label: game.i18n.localize(`${I18N}.configDialog.groups.itemTypes`), options }];
 }
 
 /**
@@ -141,11 +141,11 @@ export function getRuleSubtypeGroups() {
   const seen = new Set(["melee", "ranged"]);
   const groups = [{
     key: "weaponRange",
-    label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.weaponRange`),
+    label: game.i18n.localize(`${I18N}.configDialog.groups.weaponRange`),
     types: ["weapon"],
     options: [
-      { value: "melee", label: game.i18n.localize(`${MODULE_ID}.configDialog.option.melee`) },
-      { value: "ranged", label: game.i18n.localize(`${MODULE_ID}.configDialog.option.ranged`) }
+      { value: "melee", label: game.i18n.localize(`${I18N}.configDialog.option.melee`) },
+      { value: "ranged", label: game.i18n.localize(`${I18N}.configDialog.option.ranged`) }
     ]
   }];
 
@@ -154,7 +154,7 @@ export function getRuleSubtypeGroups() {
     const options = takeUnseen(optionsFromConfig(catalog.values), seen);
     if (options.length) groups.push({
       key: catalog.key,
-      label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.${catalog.labelKey}`),
+      label: game.i18n.localize(`${I18N}.configDialog.groups.${catalog.labelKey}`),
       options,
       types: catalog.types ?? []
     });
@@ -173,7 +173,7 @@ export function getRulePropertyGroups() {
     const options = takeUnseen(optionsFromConfig(catalog.values), seen);
     if (options.length) groups.push({
       key: catalog.key,
-      label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.${catalog.labelKey}`),
+      label: game.i18n.localize(`${I18N}.configDialog.groups.${catalog.labelKey}`),
       options
     });
   }
@@ -229,7 +229,7 @@ export function prepareRuleGroups(groups, selectedValues) {
   if (!unknownOptions.length) return groups;
   return [...groups, {
     key: "savedValues",
-    label: game.i18n.localize(`${MODULE_ID}.configDialog.groups.savedValues`),
+    label: game.i18n.localize(`${I18N}.configDialog.groups.savedValues`),
     options: unknownOptions,
     saved: true,
     types: []
@@ -251,7 +251,7 @@ export function renderRuleMultiselect({ name, groups, selectedValues, placeholde
         <label class="cr-option-row" data-search="${escapeHtml(`${option.label} ${value}`.toLocaleLowerCase())}">
           <input type="checkbox" name="${escapeHtml(name)}" value="${escapeHtml(value)}"
                  data-label="${escapeHtml(option.label)}"${checkedAttr(value)}>
-          <span class="cr-checkbox-mark" aria-hidden="true"><i class="fas fa-check"></i></span>
+          <span class="cr-checkbox-mark" aria-hidden="true"><i class="fa-solid fa-check"></i></span>
           <span class="cr-option-label">${escapeHtml(option.label)}</span>
         </label>`;
     }).join("");
@@ -260,7 +260,7 @@ export function renderRuleMultiselect({ name, groups, selectedValues, placeholde
                data-types="${escapeHtml(groupTypes)}"${group.saved ? ' data-saved="true"' : ""}>
         <label class="cr-option-group-header">
           <input type="checkbox" data-group-toggle="true">
-          <span class="cr-checkbox-mark" aria-hidden="true"><i class="fas fa-check"></i></span>
+          <span class="cr-checkbox-mark" aria-hidden="true"><i class="fa-solid fa-check"></i></span>
           <span>${escapeHtml(group.label)}</span>
           <span class="cr-group-count" aria-hidden="true"></span>
         </label>
@@ -274,32 +274,32 @@ export function renderRuleMultiselect({ name, groups, selectedValues, placeholde
            aria-expanded="false" aria-controls="${escapeHtml(panelId)}">
         <div class="cr-selection" data-selection></div>
         <button type="button" class="cr-icon-button cr-select-clear" data-action="clearSelect"
-                data-select-name="${escapeHtml(name)}" aria-label="${escapeHtml(game.i18n.localize(`${MODULE_ID}.configDialog.actions.clear`))}"
-                title="${escapeHtml(game.i18n.localize(`${MODULE_ID}.configDialog.actions.clear`))}">
-          <i class="fas fa-xmark"></i>
+                data-select-name="${escapeHtml(name)}" aria-label="${escapeHtml(game.i18n.localize(`${I18N}.configDialog.actions.clear`))}"
+                title="${escapeHtml(game.i18n.localize(`${I18N}.configDialog.actions.clear`))}">
+          <i class="fa-solid fa-xmark"></i>
         </button>
         <button type="button" class="cr-icon-button cr-select-toggle" data-action="toggleSelect"
-                data-select-name="${escapeHtml(name)}" aria-label="${escapeHtml(game.i18n.localize(`${MODULE_ID}.configDialog.actions.open`))}">
-          <i class="fas fa-chevron-down"></i>
+                data-select-name="${escapeHtml(name)}" aria-label="${escapeHtml(game.i18n.localize(`${I18N}.configDialog.actions.open`))}">
+          <i class="fa-solid fa-chevron-down"></i>
         </button>
       </div>
       <div id="${escapeHtml(panelId)}" class="cr-select-panel" role="listbox" aria-multiselectable="true"
            popover="manual" hidden>
         <div class="cr-select-toolbar">
           <label class="cr-search">
-            <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+            <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
             <input type="search" data-select-search autocomplete="off"
-                   placeholder="${escapeHtml(game.i18n.localize(`${MODULE_ID}.configDialog.search`))}">
+                   placeholder="${escapeHtml(game.i18n.localize(`${I18N}.configDialog.search`))}">
           </label>
           <div class="cr-select-actions">
             <button type="button" data-action="selectVisible" data-select-name="${escapeHtml(name)}">
-              ${escapeHtml(game.i18n.localize(`${MODULE_ID}.configDialog.actions.selectVisible`))}
+              ${escapeHtml(game.i18n.localize(`${I18N}.configDialog.actions.selectVisible`))}
             </button>
             <button type="button" data-action="deselectVisible" data-select-name="${escapeHtml(name)}">
-              ${escapeHtml(game.i18n.localize(`${MODULE_ID}.configDialog.actions.deselectVisible`))}
+              ${escapeHtml(game.i18n.localize(`${I18N}.configDialog.actions.deselectVisible`))}
             </button>
             <button type="button" data-action="clearSelect" data-select-name="${escapeHtml(name)}">
-              ${escapeHtml(game.i18n.localize(`${MODULE_ID}.configDialog.actions.clear`))}
+              ${escapeHtml(game.i18n.localize(`${I18N}.configDialog.actions.clear`))}
             </button>
             <span class="cr-select-total" data-select-total></span>
           </div>

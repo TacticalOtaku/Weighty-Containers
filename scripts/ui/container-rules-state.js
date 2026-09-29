@@ -1,4 +1,4 @@
-import { MODULE_ID } from "../constants.js";
+import { I18N } from "../constants.js";
 import { getContainerRestrictions, normalizeToken, parseTokenList } from "../core/restrictions.js";
 import { clamp, getReductionPct, num } from "../core/weight.js";
 import {
@@ -149,24 +149,24 @@ export class ContainerRulesState {
     const subtypeLabels = this.selectionLabels("allowedSubtypes").map(entry => entry.label);
     const requiredLabels = this.selectionLabels("requiredProperties").map(entry => entry.label);
     const forbiddenLabels = this.selectionLabels("forbiddenProperties").map(entry => entry.label);
-    const lines = [game.i18n.format(`${MODULE_ID}.configDialog.summary.reduction`, {
+    const lines = [game.i18n.format(`${I18N}.configDialog.summary.reduction`, {
       pct: this.reductionPct
     })];
     lines.push(typeLabels.length
-      ? game.i18n.format(`${MODULE_ID}.configDialog.summary.types`, { values: typeLabels.join(", ") })
-      : game.i18n.localize(`${MODULE_ID}.configDialog.summary.anyTypes`));
-    if (subtypeLabels.length) lines.push(game.i18n.format(`${MODULE_ID}.configDialog.summary.subtypes`, {
+      ? game.i18n.format(`${I18N}.configDialog.summary.types`, { values: typeLabels.join(", ") })
+      : game.i18n.localize(`${I18N}.configDialog.summary.anyTypes`));
+    if (subtypeLabels.length) lines.push(game.i18n.format(`${I18N}.configDialog.summary.subtypes`, {
       values: subtypeLabels.join(", ")
     }));
     if (requiredLabels.length) lines.push(game.i18n.format(
-      `${MODULE_ID}.configDialog.summary.${this.propertyMatchMode === "any" ? "requiredAny" : "requiredAll"}`,
+      `${I18N}.configDialog.summary.${this.propertyMatchMode === "any" ? "requiredAny" : "requiredAll"}`,
       { values: requiredLabels.join(", ") }
     ));
-    if (forbiddenLabels.length) lines.push(game.i18n.format(`${MODULE_ID}.configDialog.summary.forbidden`, {
+    if (forbiddenLabels.length) lines.push(game.i18n.format(`${I18N}.configDialog.summary.forbidden`, {
       values: forbiddenLabels.join(", ")
     }));
     if (!requiredLabels.length && !forbiddenLabels.length) {
-      lines.push(game.i18n.localize(`${MODULE_ID}.configDialog.summary.noProperties`));
+      lines.push(game.i18n.localize(`${I18N}.configDialog.summary.noProperties`));
     }
     return lines;
   }
