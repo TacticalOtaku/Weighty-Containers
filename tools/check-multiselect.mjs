@@ -1,3 +1,4 @@
+/* global fixture -- set on the page by the harness and read inside page.evaluate */
 // Browser regression: focus must not scroll the popover away from its content.
 // node tools/check-multiselect.mjs <Foundry resources/app> <runtime node_modules>
 import fs from 'node:fs/promises';

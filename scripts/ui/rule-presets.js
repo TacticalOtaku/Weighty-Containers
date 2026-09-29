@@ -1,4 +1,4 @@
-import { MODULE_ID } from "../constants.js";
+import { I18N } from "../constants.js";
 
 /**
  * Rule presets for the container dialog.
@@ -12,7 +12,7 @@ import { MODULE_ID } from "../constants.js";
  *   game.modules.get("weighty-containers").api.registerRulePreset({
  *     id: "my-module.spell-satchel",
  *     label: "MYMODULE.SpellSatchel",
- *     icon: "fas fa-scroll",
+ *     icon: "fa-solid fa-scroll",
  *     config: { allowedTypes: ["consumable"], allowedSubtypes: ["scroll"] }
  *   });
  *
@@ -36,20 +36,20 @@ const CONFIG_KEYS = [
 const BUILT_IN = [
   {
     id: "wc.bagOfHolding",
-    label: `${MODULE_ID}.presets.bagOfHolding`,
-    icon: "fas fa-hat-wizard",
+    label: `${I18N}.presets.bagOfHolding`,
+    icon: "fa-solid fa-hat-wizard",
     config: { reductionPct: 100 }
   },
   {
     id: "wc.reducingBag",
-    label: `${MODULE_ID}.presets.reducingBag`,
-    icon: "fas fa-feather",
+    label: `${I18N}.presets.reducingBag`,
+    icon: "fa-solid fa-feather",
     config: { reductionPct: 50 }
   },
   {
     id: "wc.quiver",
-    label: `${MODULE_ID}.presets.quiver`,
-    icon: "fas fa-arrow-right",
+    label: `${I18N}.presets.quiver`,
+    icon: "fa-solid fa-arrow-right",
     // dnd5e 5.x calls this consumable subtype `ammo`. Listing a speculative
     // `ammunition` alias alongside it does nothing except show up as a raw
     // token wherever the selection is rendered back as labels.
@@ -57,26 +57,26 @@ const BUILT_IN = [
   },
   {
     id: "wc.potionBelt",
-    label: `${MODULE_ID}.presets.potionBelt`,
-    icon: "fas fa-flask",
+    label: `${I18N}.presets.potionBelt`,
+    icon: "fa-solid fa-flask",
     config: { allowedTypes: ["consumable"], allowedSubtypes: ["potion"] }
   },
   {
     id: "wc.weaponRack",
-    label: `${MODULE_ID}.presets.weaponRack`,
-    icon: "fas fa-khanda",
+    label: `${I18N}.presets.weaponRack`,
+    icon: "fa-solid fa-khanda",
     config: { allowedTypes: ["weapon"] }
   },
   {
     id: "wc.mundaneOnly",
-    label: `${MODULE_ID}.presets.mundaneOnly`,
-    icon: "fas fa-ban",
+    label: `${I18N}.presets.mundaneOnly`,
+    icon: "fa-solid fa-ban",
     config: { forbiddenProperties: ["mgc"] }
   },
   {
     id: "wc.clear",
-    label: `${MODULE_ID}.presets.clear`,
-    icon: "fas fa-eraser",
+    label: `${I18N}.presets.clear`,
+    icon: "fa-solid fa-eraser",
     config: {
       reductionPct: 0,
       allowedTypes: [],
@@ -105,7 +105,7 @@ export function registerRulePreset(preset) {
   registry.set(preset.id, {
     id: preset.id,
     label: preset.label ?? preset.id,
-    icon: preset.icon ?? "fas fa-wand-magic-sparkles",
+    icon: preset.icon ?? "fa-solid fa-wand-magic-sparkles",
     config
   });
   return true;

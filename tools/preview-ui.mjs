@@ -30,7 +30,7 @@ const context = {
     { id: "properties", label: "Свойства", icon: "fas fa-sliders" }
   ],
   presets: listRulePresets().map(p => ({ ...p, label: localize(p.label), summary: p.config.reductionPct !== undefined ? `Снижение веса: ${p.config.reductionPct}%` : "Ограничения содержимого" })),
-  themeOptions: ["auto", "light", "dark"].map(value => ({ value, label: localize(`weighty-containers.theme.${value}`), icon: `fas fa-${value === "auto" ? "circle-half-stroke" : value === "dark" ? "moon" : "sun"}`, active: value === "auto" })),
+  themeOptions: ["auto", "light", "dark"].map(value => ({ value, label: localize(`WC.theme.${value}`), icon: `fas fa-${value === "auto" ? "circle-half-stroke" : value === "dark" ? "moon" : "sun"}`, active: value === "auto" })),
   allowedTypesSelect: select("allowedTypes"), allowedSubtypesSelect: select("allowedSubtypes"),
   requiredPropertiesSelect: select("requiredProperties"), forbiddenPropertiesSelect: select("forbiddenProperties")
 };

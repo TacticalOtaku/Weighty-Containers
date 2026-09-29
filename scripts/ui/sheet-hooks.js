@@ -1,4 +1,4 @@
-import { MODULE_ID } from "../constants.js";
+import { I18N } from "../constants.js";
 import { LOG } from "../foundry/logger.js";
 import { openReductionDialog } from "./container-rules-app.js";
 
@@ -34,7 +34,7 @@ function ensureRulesButton(app, element) {
   const root = element instanceof HTMLElement ? element : app.element;
   if (!(root instanceof HTMLElement) || root.querySelector(".wc-inline-gear")) return;
 
-  const label = game.i18n.localize(`${MODULE_ID}.${isGM ? "configBtn.title" : "configBtn.view"}`);
+  const label = game.i18n.localize(`${I18N}.${isGM ? "configBtn.title" : "configBtn.view"}`);
   const button = document.createElement("button");
   button.type = "button";
   button.dataset.tooltip = label;

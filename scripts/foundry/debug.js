@@ -33,7 +33,7 @@ export function buildDebugApi({
 
   return {
     dumpContainer(itemOrName) {
-      let item = null;
+      let item;
       if (itemOrName instanceof Item) {
         item = itemOrName;
       } else if (typeof itemOrName === "string") {

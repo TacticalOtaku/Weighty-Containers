@@ -1,4 +1,4 @@
-import { MODULE_ID } from "../constants.js";
+import { I18N } from "../constants.js";
 import { normalizeToken, parseTokenList } from "../core/restrictions.js";
 import { clamp } from "../core/weight.js";
 import { RULE_SELECTION_NAMES } from "./container-rules-state.js";
@@ -94,15 +94,15 @@ export class ContainerRulesMultiselectController {
     const chips = visibleLabels.map(({ value, label }) => `
       <button type="button" class="cr-chip" data-action="removeSelection"
               data-select-name="${escapeHtml(name)}" data-token="${escapeHtml(value)}"
-              title="${escapeHtml(game.i18n.localize(`${MODULE_ID}.configDialog.actions.remove`))}">
-        <span>${escapeHtml(label)}</span><i class="fas fa-xmark" aria-hidden="true"></i>
+              title="${escapeHtml(game.i18n.localize(`${I18N}.configDialog.actions.remove`))}">
+        <span>${escapeHtml(label)}</span><i class="fa-solid fa-xmark" aria-hidden="true"></i>
       </button>`).join("");
     const more = labels.length > 3
       ? `<span class="cr-chip cr-chip-more">+${labels.length - 3}</span>`
       : "";
     const placeholder = `<span class="cr-placeholder">${escapeHtml(root.dataset.placeholder)}</span>`;
     const mobile = `<span class="cr-mobile-selection">${escapeHtml(game.i18n.format(
-      `${MODULE_ID}.configDialog.selectedCount`,
+      `${I18N}.configDialog.selectedCount`,
       { count: labels.length }
     ))}</span>`;
     const previousCount = Number(root.dataset.selectionCount ?? -1);
@@ -124,13 +124,13 @@ export class ContainerRulesMultiselectController {
       root.querySelectorAll('.cr-option-row input[type="checkbox"]')
     ).map(input => normalizeToken(input.value)));
     const total = root.querySelector("[data-select-total]");
-    if (total) total.textContent = game.i18n.format(`${MODULE_ID}.configDialog.selectedOf`, {
+    if (total) total.textContent = game.i18n.format(`${I18N}.configDialog.selectedOf`, {
       selected: selected.size,
       total: uniqueOptions.size
     });
     const result = root.querySelector("[data-select-result]");
     if (result) result.textContent = game.i18n.format(
-      `${MODULE_ID}.configDialog.selectedCount`,
+      `${I18N}.configDialog.selectedCount`,
       { count: selected.size }
     );
 
@@ -192,7 +192,7 @@ export class ContainerRulesMultiselectController {
     warning.hidden = values.length === 0;
     const text = warning.querySelector("[data-warning-text]");
     if (text) text.textContent = game.i18n.format(
-      `${MODULE_ID}.configDialog.unavailableSubtypes`,
+      `${I18N}.configDialog.unavailableSubtypes`,
       { count: values.length }
     );
   }
@@ -302,7 +302,9 @@ export class ContainerRulesMultiselectController {
     if (panel) {
       try {
         if (panel.matches(":popover-open")) panel.hidePopover();
-      } catch {}
+      } catch {
+        // Without popover support the hidden attribute below closes the panel.
+      }
       panel.hidden = true;
       panel.removeAttribute("style");
     }

@@ -1,4 +1,4 @@
-import { MODULE_ID } from "../constants.js";
+import { I18N, MODULE_ID } from "../constants.js";
 import {
   collectContainerAncestorIds,
   createProjectedActor,
@@ -89,30 +89,30 @@ function makeRestrictionMessage({ containerName, itemName, restrictions }) {
   const details = [];
   const list = name => ruleTokenLabels(name, restrictions[name]).join(", ");
   if (restrictions.allowedTypes.length) {
-    details.push(game.i18n.format(`${MODULE_ID}.restrictionMessage.types`, {
+    details.push(game.i18n.format(`${I18N}.restrictionMessage.types`, {
       types: list("allowedTypes")
     }));
   }
   if (restrictions.allowedSubtypes.length) {
-    details.push(game.i18n.format(`${MODULE_ID}.restrictionMessage.subtypes`, {
+    details.push(game.i18n.format(`${I18N}.restrictionMessage.subtypes`, {
       subtypes: list("allowedSubtypes")
     }));
   }
   if (restrictions.requiredProperties.length) {
-    details.push(game.i18n.format(`${MODULE_ID}.restrictionMessage.properties`, {
+    details.push(game.i18n.format(`${I18N}.restrictionMessage.properties`, {
       properties: list("requiredProperties")
     }));
   }
   if (restrictions.forbiddenProperties.length) {
     details.push(game.i18n.format(
-      `${MODULE_ID}.restrictionMessage.forbiddenProperties`,
+      `${I18N}.restrictionMessage.forbiddenProperties`,
       { properties: list("forbiddenProperties") }
     ));
   }
-  return game.i18n.format(`${MODULE_ID}.restrictionMessage.default`, {
+  return game.i18n.format(`${I18N}.restrictionMessage.default`, {
     containerName: containerName
-      ?? localizeFallback(`${MODULE_ID}.fallback.container`, "Container"),
-    itemName: itemName ?? localizeFallback(`${MODULE_ID}.fallback.item`, "Item"),
+      ?? localizeFallback(`${I18N}.fallback.container`, "Container"),
+    itemName: itemName ?? localizeFallback(`${I18N}.fallback.item`, "Item"),
     rules: details.join("; ")
   });
 }
@@ -134,21 +134,21 @@ function fillPlaceholders(template, values) {
 
 export function makeCapacityMessage(violation) {
   const containerName = violation.containerName
-    ?? localizeFallback(`${MODULE_ID}.fallback.container`, "Container");
+    ?? localizeFallback(`${I18N}.fallback.container`, "Container");
 
   let key;
   let values;
   if (violation.kind === "count") {
-    key = `${MODULE_ID}.exceedMessage.count`;
+    key = `${I18N}.exceedMessage.count`;
     values = {
       containerName,
       before: Math.round(violation.before),
       delta: Math.round(violation.delta),
       capacity: Math.round(violation.capacity),
-      unit: localizeFallback(`${MODULE_ID}.fallback.items`, "items")
+      unit: localizeFallback(`${I18N}.fallback.items`, "items")
     };
   } else {
-    key = `${MODULE_ID}.exceedMessage.default`;
+    key = `${I18N}.exceedMessage.default`;
     const format = value => Number(lbsToDisplay(value).toFixed(2));
     values = {
       containerName,

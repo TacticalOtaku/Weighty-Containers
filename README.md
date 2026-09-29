@@ -6,7 +6,7 @@
 или оружейную стойку с ограничениями по свойствам предметов. Модуль учитывает
 правила при помещении предметов в контейнер и передаёт снижение веса в расчёты системы.
 
-**Версия:** 3.6.0 · **Языки интерфейса:** русский и английский · **Автор:** TacticalOtaku
+**Версия:** 3.7.0 · **Языки интерфейса:** русский и английский · **Автор:** TacticalOtaku
 
 [Установка](#установка) · [Быстрый старт](#быстрый-старт) · [Настройки](#настройки-модуля) · [API](API.md) · [Дизайн-система](DESIGN.md)
 
@@ -196,11 +196,17 @@ Hooks.once("weighty-containers.ready", api => {
 ### Проверки
 
 Исходники используют JavaScript ES modules; отдельная сборка для запуска в Foundry не требуется.
-Для автоматических тестов нужен Node.js с поддержкой встроенного тестового раннера.
+Нужен Node.js 24 или новее.
 
 ```sh
-npm test
+npm install
+npm run check    # ESLint и тесты node --test
+npm run deploy   # копия модуля в %LOCALAPPDATA%/FoundryVTT/Data/modules/weighty-containers (или FOUNDRY_DATA, --data <путь>)
+npm run release  # check, затем dist/weighty-containers-v<версия>.zip
 ```
+
+`npm run release` отказывается упаковывать модуль, если версия, ссылки или файлы в `module.json`
+не совпадают с `package.json`.
 
 Сценарий проверки в игровом мире: [Foundry V14 smoke test](tests/manual/foundry-v14-smoke.md).
 

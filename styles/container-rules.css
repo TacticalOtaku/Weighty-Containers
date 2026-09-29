@@ -441,11 +441,17 @@
    Tabs
    ============================================================ */
 
+/* Adopting ApplicationV2's tab machinery means carrying its generic .tabs and
+   .tab classes, which core already styles: a flex row that spreads its tabs
+   with `justify-content: space-evenly`, and `display: none` on panes.
+   Specificity alone is not enough — a property we never declare is a property
+   core still owns, so the ones that matter are set here explicitly. */
 .container-rules .cr-tabs {
   background: var(--a-surface);
   border-bottom: 1px solid var(--a-outline-variant);
   display: flex;
   gap: var(--a-space-2);
+  justify-content: flex-start;
   padding: var(--a-space-4) var(--a-space-6);
   position: relative;
 }
@@ -473,7 +479,7 @@
 .container-rules .cr-tab:hover { background: var(--a-state-hover); }
 .container-rules .cr-tab:active { background: var(--a-state-press); }
 
-.container-rules .cr-tab.is-active {
+.container-rules .cr-tab.active {
   background: var(--a-state-hover);
   color: var(--a-primary);
   font-weight: var(--a-weight-semibold);
@@ -530,7 +536,7 @@
   gap: var(--a-space-7);
 }
 
-.container-rules .cr-pane.is-active {
+.container-rules .cr-pane.active {
   animation: a-rise var(--a-dur-medium) var(--a-ease-decel) both;
   display: grid;
 }

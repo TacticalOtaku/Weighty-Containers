@@ -1,11 +1,24 @@
 {
   "name": "weighty-containers",
-  "version": "3.5.1",
+  "version": "3.7.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "test": "node --test",
-    "check": "node --check scripts/main.js && node --test",
-    "sync": "node tools/sync-to-foundry.mjs"
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "check": "npm run lint && npm test",
+    "deploy": "node tools/deploy.mjs",
+    "package": "node tools/package.mjs",
+    "release": "npm run check && npm run package"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.10.0",
+    "globals": "^17.12.0",
+    "prettier": "^3.9.7"
   }
 }
