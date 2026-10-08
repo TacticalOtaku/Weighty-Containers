@@ -23,10 +23,6 @@ export class ItemCollectionView {
     return this.items.get(id);
   }
 
-  find(predicate) {
-    return Array.from(this.items.values()).find(predicate);
-  }
-
   [Symbol.iterator]() {
     return this.items.values();
   }
@@ -255,27 +251,16 @@ export function computeActorCarriedLbs(
  *
  * @param {Object} actor
  * @param {Object} candidateItem  The changed or created item.
- * @param {Object[]} [siblings]   Other items created in the same operation,
- *                                e.g. a container's contents dropped with it.
  */
-export function createProjectedActor(actor, candidateItem, siblings = []) {
-  const incoming = new Map();
-  for (const sibling of siblings) {
-    if (sibling?.id) incoming.set(sibling.id, sibling);
-  }
-  if (candidateItem?.id) incoming.set(candidateItem.id, candidateItem);
-
-  const items = [];
-  for (const item of actor?.items ?? []) {
-    if (incoming.has(item.id)) {
-      items.push(incoming.get(item.id));
-      incoming.delete(item.id);
-    } else {
-      items.push(item);
-    }
-  }
-  items.push(...incoming.values());
-  if (!candidateItem?.id) items.push(candidateItem);
+export function createProjectedActor(actor, candidateItem) {
+  const id = candidateItem?.id;
+  let replaced = false;
+  const items = Array.from(actor?.items ?? [], item => {
+    if (!id || item.id !== id) return item;
+    replaced = true;
+    return candidateItem;
+  });
+  if (!replaced) items.push(candidateItem);
   return { items: new ItemCollectionView(items) };
 }
 
@@ -331,11 +316,12 @@ export function findCapacityViolations(
       : null;
 
     const loadIncreased = after > before + LOAD_EPSILON;
-    const capacityDecreased = previousCapacity != null
-      && capacity < previousCapacity - LOAD_EPSILON;
+    // A limit where there was none (or a new container) tightens the rule just
+    // as lowering an existing limit does.
+    const capacityDecreased = previousCapacity == null
+      || capacity < previousCapacity - LOAD_EPSILON;
 
-    if (after > capacity + LOAD_EPSILON
-        && (loadIncreased || capacityDecreased || !currentContainer)) {
+    if (after > capacity + LOAD_EPSILON && (loadIncreased || capacityDecreased)) {
       violations.push({
         container: projectedContainer,
         kind: countCapacity ? "count" : "weight",

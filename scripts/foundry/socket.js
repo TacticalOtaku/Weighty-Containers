@@ -47,13 +47,6 @@ export class WCSocket {
     if (this.socket) this.socket.register(name, handler);
   }
 
-  async executeForEveryone(name, ...args) {
-    if (!this.ready || !this.handlers.has(name)) return;
-    if (this.socket) return this.socket.executeForEveryone(name, ...args);
-    this.handlers.get(name)(...args);
-    game.socket.emit(`module.${MODULE_ID}`, { name, args, users: null });
-  }
-
   /**
    * Run a handler on the listed users only. The local user is handled inline so
    * the notification appears even when no socket transport is available.

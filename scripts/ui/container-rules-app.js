@@ -251,6 +251,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
   }
 
   async _prepareContext(options) {
+    // With a single tab group, ApplicationV2 already puts `tabs` in here.
     const context = await super._prepareContext(options);
     const propertyGroups = this.rules.catalogs.requiredProperties;
     const preview = this._previewBasis();
@@ -271,7 +272,6 @@ class ContainerRulesApp extends ContainerRulesApplication {
         label: game.i18n.localize(preset.label),
         summary: this._describePreset(preset.config)
       })),
-      tabs: this._prepareTabs(RULE_TAB_GROUP),
       reductionPct: this.rules.reductionPct,
       previewUnit: preview.unit,
       previewIsActual: preview.actual,

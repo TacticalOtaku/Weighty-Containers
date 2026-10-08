@@ -133,3 +133,24 @@ test("cycles are broken deterministically", () => {
   assert.equal(Number.isFinite(result.load), true);
   assert.deepEqual(cycles, ["first"]);
 });
+
+test("setting a first capacity below the current load is judged like lowering one", () => {
+  const bag = item({ id: "bag", type: "container" });
+  const payload = item({ id: "payload", container: "bag", weight: 8 });
+  const current = actor([bag, payload]);
+  const projected = createProjectedActor(
+    current,
+    item({ id: "bag", type: "container", capacity: 5 })
+  );
+
+  assert.deepEqual(findCapacityViolations(current, projected).map(entry => entry.container.id), ["bag"]);
+});
+
+test("an unchanged over-full container does not block unrelated edits", () => {
+  const bag = item({ id: "bag", type: "container", capacity: 5 });
+  const payload = item({ id: "payload", container: "bag", weight: 8 });
+  const current = actor([bag, payload]);
+  const projected = createProjectedActor(current, item({ id: "payload", container: "bag", weight: 8 }));
+
+  assert.deepEqual(findCapacityViolations(current, projected), []);
+});

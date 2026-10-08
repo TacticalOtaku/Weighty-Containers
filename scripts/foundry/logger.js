@@ -3,7 +3,8 @@ import { LOG_LEVELS, MODULE_ID } from "../constants.js";
 export class WCLogger {
   constructor() {
     this.level = "warn";
-    this.keepBuffer = true;
+    // Kept regardless of level, so `weightyCont.dumpLog()` can show what led up
+    // to a problem even when the console showed nothing.
     this.bufferLimit = 500;
     this.withStacks = false;
     this.buffer = [];
@@ -26,11 +27,9 @@ export class WCLogger {
       data: data ?? null,
       stack: this.withStacks ? new Error().stack : null
     };
-    if (this.keepBuffer) {
-      this.buffer.push(entry);
-      while (this.buffer.length > Math.max(0, this.bufferLimit)) {
-        this.buffer.shift();
-      }
+    this.buffer.push(entry);
+    while (this.buffer.length > Math.max(0, this.bufferLimit)) {
+      this.buffer.shift();
     }
     if (!this._shouldLog(level)) return;
 

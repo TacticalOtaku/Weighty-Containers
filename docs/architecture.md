@@ -61,5 +61,14 @@ keep the module id.
 ## Checks
 
 `npm run check` runs ESLint and the `node --test` suite. `tools/preview-ui.mjs` renders the real templates in both
-themes for visual review (needs Foundry, Playwright and Edge); `tests/manual/foundry-v14-smoke.md` is the in-world
-scenario.
+themes for visual review, and `tools/check-multiselect.mjs` drives the option lists with mouse and keyboard in a real
+browser; both take `<Foundry resources/app> <node_modules with playwright>` and need Edge.
+`tests/manual/foundry-v14-smoke.md` is the in-world scenario.
+
+## Known limits
+
+- A container dropped together with its contents is projected alone: Foundry does not pass the rest of the batch to
+  `preCreateItem`, so that drop is not capacity-checked (see the `ponytail:` note in `foundry/enforcement.js`).
+- dnd5e's own capacity bar compares `capacity.weight.value` with contents weighed in the container's `weight.units`
+  without converting. The module converts, so a container whose two units differ can show a bar that disagrees with
+  what enforcement allows. Keep both units the same.
