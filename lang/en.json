@@ -26,7 +26,7 @@
     },
     "logBufferLimit": {
       "name": "Log buffer size",
-      "hint": "Maximum number of log entries kept in memory buffer."
+      "hint": "Maximum number of log entries kept in memory. Show them with weightyCont.dumpLog() in the browser console."
     },
     "exceedMessageText": {
       "name": "Custom exceed notification",

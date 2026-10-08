@@ -19,5 +19,5 @@ test("socket ignores calls to unregistered handlers", async () => {
   };
   const socket = new WCSocket(logger);
   socket.ready = true;
-  assert.equal(await socket.executeForEveryone("updateContainerConfig", {}), undefined);
+  assert.equal(await socket.executeForUsers("updateContainerConfig", ["u1"], {}), undefined);
 });

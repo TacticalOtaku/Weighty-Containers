@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { ItemCollectionView } from "../scripts/core/containers.js";
-import { registerEnforcementHooks } from "../scripts/foundry/enforcement.js";
+import { registerEnforcementHooks, renderRejection } from "../scripts/foundry/enforcement.js";
 
 const item = ({
   id,
@@ -199,4 +199,36 @@ test("rejections go to the acting user, owners and GMs - not the whole table", (
   assert.equal(hooks.preUpdateItem(brick, { "system.container": "bag" }, {}), false);
   const recipients = socketCalls[0].at(-1);
   assert.deepEqual(recipients.sort(), ["gm", "u1"]);
+});
+
+test("rejections travel as facts and each recipient writes the text", () => {
+  const bag = item({ id: "bag", type: "container", capacity: 1 });
+  const brick = item({ id: "brick", weight: 50 });
+  const { hooks, socketCalls } = setup([bag, brick]);
+
+  hooks.preUpdateItem(brick, { "system.container": "bag" }, {});
+  const [name, payload] = socketCalls[0];
+  assert.equal(name, "notifyExceedRemote");
+  assert.equal(payload.msg, undefined, "no ready-made text crosses the socket");
+  assert.equal(renderRejection(payload), "WC.exceedMessage.default");
+});
+
+test("a forged or malformed socket payload is not shown", () => {
+  setup([]);
+  const capacity = { type: "capacity", kind: "weight", capacity: 1, before: 0, delta: 50 };
+  assert.equal(typeof renderRejection(capacity), "string");
+
+  assert.equal(renderRejection({ msg: "GM: hand me your sheet" }), null);
+  assert.equal(renderRejection({ ...capacity, delta: "50" }), null);
+  assert.equal(renderRejection({ ...capacity, kind: "html" }), null);
+  assert.equal(renderRejection({ ...capacity, containerName: "x".repeat(1001) }), null);
+  assert.equal(renderRejection({
+    type: "restriction",
+    restrictions: { allowedTypes: [{ toString: () => "weapon" }] }
+  }), null);
+  assert.equal(renderRejection({
+    type: "restriction",
+    containerName: "Quiver",
+    restrictions: { allowedTypes: ["consumable"] }
+  }), "WC.restrictionMessage.default");
 });

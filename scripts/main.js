@@ -13,7 +13,7 @@ import {
 import { getCapacityLbs as resolveCapacityLbs } from "./core/weight.js";
 import { installPublicApi } from "./foundry/api.js";
 import { buildDebugApi } from "./foundry/debug.js";
-import { registerEnforcementHooks } from "./foundry/enforcement.js";
+import { registerEnforcementHooks, renderRejection } from "./foundry/enforcement.js";
 import { LOG } from "./foundry/logger.js";
 import {
   registerContainerPatch,
@@ -65,9 +65,10 @@ function computeAdjustedLoad(actor, containerId, idx = null, memo = null, visite
   });
 }
 
+// No includeNested here: that setting only shapes container capacity. Carried
+// weight always counts nested contents, exactly as the patched sheet does.
 function computeActorCarriedLbs(actor) {
   return computeActorCarriedLbsCore(actor, {
-    includeNested: includeNested(),
     defaultUnit: getSystemWeightUnit(),
     validateItem: makeEncumbranceItemFilter(actor),
     currencyLbs: containerCurrencyLbs,
@@ -83,11 +84,12 @@ function validateContainerRestrictions(containerItem, itemData) {
 }
 
 function notifyExceedRemote(data) {
-  if (typeof data?.msg !== "string" || data.msg.length > 1000) {
+  const message = renderRejection(data);
+  if (!message) {
     LOG.warn("Rejected invalid notification socket payload");
     return;
   }
-  ui.notifications?.warn(data.msg);
+  ui.notifications?.warn(message);
 }
 
 registerModuleSettings(LOG);

@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const [foundry, packages] = process.argv.slice(2);
+if (!foundry || !packages) throw new Error('Pass Foundry resources/app and runtime node_modules paths.');
 const { chromium } = require(path.join(packages, 'playwright'));
 const root = path.resolve(import.meta.dirname, '..');
 const server = http.createServer(async (req, res) => {

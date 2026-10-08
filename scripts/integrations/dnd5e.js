@@ -1,4 +1,4 @@
-import { lbsPerUnit, lbsToUnit, setUnitConversionTable } from "../core/units.js";
+import { lbsToUnit, setUnitConversionTable } from "../core/units.js";
 
 export const CONTAINER_DATA_MODEL_PATH = "CONFIG.Item.dataModels.container";
 
@@ -65,11 +65,6 @@ export function getSystemWeightUnit() {
 
 export function lbsToDisplay(lbs) {
   return lbsToUnit(lbs, getSystemWeightUnit());
-}
-
-/** Convert a value expressed in the display unit back into pounds. */
-export function displayToLbs(value) {
-  return (Number(value) || 0) * (lbsPerUnit(getSystemWeightUnit()) ?? 1);
 }
 
 /** Whether dnd5e is counting coin weight at all. */

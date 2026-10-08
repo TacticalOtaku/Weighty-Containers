@@ -202,22 +202,27 @@ const RULE_GROUP_SOURCES = {
  * Unknown tokens, or a Foundry that is not ready yet, fall back to the token.
  * @param {string} name     One of the rule selection names.
  * @param {string[]} tokens
+ * @param {Map} [cache]     Shared across calls so a catalog is built once.
  * @returns {string[]}
  */
-export function ruleTokenLabels(name, tokens) {
-  const values = parseTokenList(tokens);
-  let labels = new Map();
-  try {
-    for (const group of RULE_GROUP_SOURCES[name]?.() ?? []) {
-      for (const option of group.options) {
-        const key = normalizeToken(option.value);
-        if (!labels.has(key)) labels.set(key, option.label);
+export function ruleTokenLabels(name, tokens, cache = new Map()) {
+  const source = RULE_GROUP_SOURCES[name];
+  if (!cache.has(source)) {
+    const labels = new Map();
+    try {
+      for (const group of source?.() ?? []) {
+        for (const option of group.options) {
+          const key = normalizeToken(option.value);
+          if (!labels.has(key)) labels.set(key, option.label);
+        }
       }
+    } catch {
+      labels.clear();
     }
-  } catch {
-    labels = new Map();
+    cache.set(source, labels);
   }
-  return values.map(value => labels.get(value) || value);
+  const labels = cache.get(source);
+  return parseTokenList(tokens).map(value => labels.get(value) || value);
 }
 
 export function prepareRuleGroups(groups, selectedValues) {

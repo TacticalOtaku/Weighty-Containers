@@ -15,7 +15,7 @@ if (api?.apiVersion >= 2) {
 ```
 
 `globalThis.weightyCont` is the console handle. It carries the same API plus the
-`dumpContainer` / `dumpActor` debug helpers, whose shape may change without
+`dumpContainer` / `dumpActor` / `dumpLog` debug helpers, whose shape may change without
 notice — don't build on those.
 
 Both are available from the `ready` hook onwards. To be woken up as soon as it
@@ -83,8 +83,12 @@ subtype rule.
 - `getCapacityLbs(container)` → number | `null` — weight capacity
 - `getCapacityCount(container)` → number | `null` — item-count capacity, which
   dnd5e prefers over weight when both are set
-- `computeAdjustedLoad(actor, containerId)` → `{ load, trace }` in pounds
-- `computeActorCarriedLbs(actor)` → number
+- `computeAdjustedLoad(actor, containerId)` → `{ load, trace }` in pounds. With
+  the `includeNested` setting off, sub-containers count by their own weight only,
+  as in the capacity check.
+- `computeActorCarriedLbs(actor)` → number — the actor's carried weight. It
+  always counts nested contents, matching the sheet's encumbrance; since 3.8.0
+  the `includeNested` setting no longer lowers it.
 - `lbsToDisplay(lbs)` → number in the client's display unit
 - `getSystemWeightUnit()` → `"kg" | "lb"`
 
@@ -110,7 +114,7 @@ The dialog's preset row is an open registry:
 api.registerRulePreset({
   id: "my-module.spell-satchel",
   label: "MYMODULE.SpellSatchel",   // localization key or literal
-  icon: "fas fa-scroll",
+  icon: "fa-solid fa-scroll",
   config: { allowedTypes: ["consumable"], allowedSubtypes: ["scroll"] }
 });
 ```

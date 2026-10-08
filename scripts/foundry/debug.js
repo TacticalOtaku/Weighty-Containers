@@ -1,6 +1,7 @@
 import { buildContainerIndex } from "../core/containers.js";
 import { getContainerRestrictions } from "../core/restrictions.js";
 import { getReductionPct, isContainer } from "../core/weight.js";
+import { LOG } from "./logger.js";
 
 /**
  * Console-only helpers.
@@ -32,6 +33,13 @@ export function buildDebugApi({
   };
 
   return {
+    /** The in-memory log buffer, newest last; attach it to a bug report. */
+    dumpLog() {
+      const entries = LOG.buffer.map(entry => ({ ...entry }));
+      console.table(entries.map(({ ts, level, msg }) => ({ ts, level, msg })));
+      return entries;
+    },
+
     dumpContainer(itemOrName) {
       let item;
       if (itemOrName instanceof Item) {

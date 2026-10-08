@@ -14,7 +14,10 @@ import {
   getWeightUnitLabel,
   lbsToDisplay
 } from "../integrations/dnd5e.js";
+import { RULE_SELECTION_NAMES } from "../ui/container-rules-state.js";
 import { ruleTokenLabels } from "../ui/rule-presentation.js";
+
+const MAX_SOCKET_TEXT = 1000;
 
 function makeItemCandidate(item, changes = {}) {
   const source = item?.toObject?.() ?? {
@@ -67,19 +70,6 @@ export function isRelevantItemChange(changes) {
   return RELEVANT_CHANGE_PATHS.some(path => touchesPath(expanded, path));
 }
 
-/**
- * Items created alongside this one in the same operation - dnd5e drops a
- * container together with its contents in one `createDocuments(..., {keepId})`
- * call. Without them the projection would weigh the container empty, and its
- * contents would point at a container that does not exist yet.
- */
-function creationSiblings(options, candidate) {
-  if (!options?.keepId || !Array.isArray(options.data)) return [];
-  return options.data
-    .filter(data => data && typeof data === "object" && data._id && data._id !== candidate.id)
-    .map(data => ({ ...foundry.utils.deepClone(data), id: data._id }));
-}
-
 function localizeFallback(key, fallback) {
   const value = game.i18n?.localize?.(key);
   return value && value !== key ? value : fallback;
@@ -87,7 +77,8 @@ function localizeFallback(key, fallback) {
 
 function makeRestrictionMessage({ containerName, itemName, restrictions }) {
   const details = [];
-  const list = name => ruleTokenLabels(name, restrictions[name]).join(", ");
+  const labelCache = new Map();
+  const list = name => ruleTokenLabels(name, restrictions[name], labelCache).join(", ");
   if (restrictions.allowedTypes.length) {
     details.push(game.i18n.format(`${I18N}.restrictionMessage.types`, {
       types: list("allowedTypes")
@@ -165,6 +156,40 @@ export function makeCapacityMessage(violation) {
 }
 
 /**
+ * Turn a rejection received over the socket into the text to show.
+ *
+ * Any connected client can write to the module's socket channel, so nothing in
+ * the payload is shown as sent: the message is rebuilt here from checked
+ * fields, with this world's own wording.
+ * @returns {string|null} null when the payload is malformed
+ */
+export function renderRejection(data) {
+  if (!data || typeof data !== "object") return null;
+  const isText = value => value == null || (typeof value === "string" && value.length <= MAX_SOCKET_TEXT);
+  if (!isText(data.containerName) || !isText(data.itemName)) return null;
+  const { containerName, itemName } = data;
+
+  if (data.type === "capacity") {
+    const { kind, capacity, before, delta } = data;
+    if (!["weight", "count"].includes(kind)) return null;
+    if (![capacity, before, delta].every(Number.isFinite)) return null;
+    return makeCapacityMessage({ containerName, kind, capacity, before, delta });
+  }
+
+  if (data.type === "restriction") {
+    if (!data.restrictions || typeof data.restrictions !== "object") return null;
+    const restrictions = {};
+    for (const name of RULE_SELECTION_NAMES) {
+      const tokens = data.restrictions[name] ?? [];
+      if (!Array.isArray(tokens) || tokens.length > 100 || !tokens.every(isText)) return null;
+      restrictions[name] = tokens.filter(Boolean);
+    }
+    return makeRestrictionMessage({ containerName, itemName, restrictions });
+  }
+  return null;
+}
+
+/**
  * Who should see a rejection.
  *
  * A player overfilling their own backpack is nobody else's business, so the
@@ -205,14 +230,14 @@ function isBypassed(options) {
 }
 
 export function registerEnforcementHooks({ logger, socket }) {
-  const notify = (msg, payload, actor) => {
+  // Facts only; each recipient builds the text itself (see renderRejection).
+  const notify = (payload, actor) => {
     const targets = resolveNotificationTargets(getNotifyScope(), { actor });
-    socket.executeForUsers("notifyExceedRemote", targets, { msg, ...payload });
+    socket.executeForUsers("notifyExceedRemote", targets, payload);
   };
 
   const notifyRestriction = ({ actor, actorName, containerName, itemName, restrictions }) => {
-    const msg = makeRestrictionMessage({ containerName, itemName, restrictions });
-    notify(msg, { actorName, containerName, itemName, restrictions }, actor);
+    notify({ type: "restriction", containerName, itemName, restrictions }, actor);
     logger.info("container restriction failed", {
       actorName, containerName, itemName, restrictions
     });
@@ -235,17 +260,14 @@ export function registerEnforcementHooks({ logger, socket }) {
 
   const notifyCapacity = (violation, actor) => {
     const data = {
+      type: "capacity",
       containerName: violation.container?.name,
       kind: violation.kind,
       capacity: violation.capacity,
       before: violation.before,
-      delta: violation.delta,
-      // 3.4.0-shaped aliases
-      capacityLbs: violation.capacityLbs,
-      beforeLbs: violation.beforeLbs,
-      deltaLbs: violation.deltaLbs
+      delta: violation.delta
     };
-    notify(makeCapacityMessage(data), data, actor);
+    notify(data, actor);
     logger.info("capacity exceeded", data);
   };
 
@@ -256,18 +278,20 @@ export function registerEnforcementHooks({ logger, socket }) {
     if (!isCreate && !isRelevantItemChange(changes)) return;
 
     const candidate = makeItemCandidate(item, changes);
-    const siblings = isCreate ? creationSiblings(options, candidate) : [];
-    const projectedActor = createProjectedActor(actor, candidate, siblings);
+    // ponytail: each document is projected alone. Foundry strips `data` from the
+    // options preCreateItem receives, so a container dropped together with its
+    // contents is weighed empty and its contents arrive unchecked. Seeing the
+    // whole batch needs a `_preCreateOperation` override; do that if users hit it.
+    const projectedActor = createProjectedActor(actor, candidate);
     const destinationId = candidate.system?.container ?? null;
     const previousId = isCreate ? null : (item.system?.container ?? null);
 
     // Only validate content rules when the item is actually entering a
     // container. Re-checking on every edit freezes anything already inside a
     // container whose rules were tightened afterwards - it could not even be
-    // equipped or renamed. Contents created together with their container
-    // were already inside it, so they are not re-judged either.
-    const arrivesWithContainer = siblings.some(entry => entry.id === destinationId);
-    if (destinationId && destinationId !== previousId && !arrivesWithContainer) {
+    // equipped or renamed. Contents created together with their container find
+    // no destination here (it is not on the actor yet), so they pass.
+    if (destinationId && destinationId !== previousId) {
       const destination = getItem(projectedActor, destinationId);
       if (destination && !enforceRestrictions(actor, destination, candidate)) return false;
     }
