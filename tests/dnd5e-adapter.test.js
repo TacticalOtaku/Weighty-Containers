@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 
 import {
   CONTAINER_DATA_MODEL_PATH,
+  actorCurrencyLbs,
+  containerCurrencyLbs,
   getContainerDataModelClass,
   getPropertyCatalogs,
   getSubtypeCatalogs,
@@ -50,4 +52,17 @@ test("D&D5e adapter falls back safely before Foundry globals are ready", () => {
   assert.deepEqual(getWeaponTypeMap(), {});
   assert.equal(getContainerDataModelClass(), null);
   assert.deepEqual(getValidPropertiesByItemType(), {});
+});
+
+test("coin weight is converted to pounds from the unit dnd5e counts it in", () => {
+  globalThis.game = {
+    settings: { get: (moduleId, key) => moduleId === "dnd5e" && ["metricWeightUnits", "currencyWeight"].includes(key) }
+  };
+  globalThis.CONFIG = { DND5E: { encumbrance: { currencyPerWeight: { imperial: 50, metric: 110 } } } };
+
+  // 1100 coins weigh 10 kg in a metric world, both on the actor and in a kg bag.
+  assert.equal(actorCurrencyLbs({ system: { currency: { gp: 1100 } } }), 25);
+  assert.equal(containerCurrencyLbs({ system: { currencyWeight: 10, weight: { units: "kg" } } }), 25);
+  // dnd5e adds a bag's coin weight in the bag's own units, whatever the display unit.
+  assert.equal(containerCurrencyLbs({ system: { currencyWeight: 10, weight: { units: "lb" } } }), 10);
 });

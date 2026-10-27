@@ -16,6 +16,7 @@ scripts/
     units.js
   integrations/
     dnd5e.js         weight units, weapon types, currency weight, encumbrance item filter
+    item-piles.js    Item Piles pre-hooks that put items on an actor (optional module)
   foundry/           everything that touches the Foundry runtime
     runtime.js         settings, dnd5e unit table, the ContainerData patch
     enforcement.js     preCreateItem / preUpdateItem rules and notifications
@@ -44,6 +45,11 @@ relies on the same table; any other factor makes the two modules disagree.
 weight- or rule-relevant path skip the projection. The `enforceMode` world setting decides between blocking and
 warning. Other modules and macros can bypass a check with the operation option `{ "weighty-containers": { bypass: true } }`.
 
+With Item Piles active, its transfers, trades and added items are checked as one batch in its own pre-hooks
+(`integrations/item-piles.js`). Item Piles deletes from the source before it creates on the target, so the check
+has to cancel the operation there; a refusal in `preCreateItem` would lose the items. The batch is projected in one
+go, so a container taken with its contents is weighed full. In warn mode the guard warns and lets the operation run.
+
 Rejections are shown to the users chosen by the `notifyScope` setting through the socket. The socket facade has no
 "run as GM" method: no client can ask a GM to write documents on its behalf.
 
@@ -67,7 +73,7 @@ browser; both take `<Foundry resources/app> <node_modules with playwright>` and 
 
 ## Known limits
 
-- A container dropped together with its contents is projected alone: Foundry does not pass the rest of the batch to
+- A container dropped together with its contents (outside Item Piles) is projected alone: Foundry does not pass the rest of the batch to
   `preCreateItem`, so that drop is not capacity-checked (see the `ponytail:` note in `foundry/enforcement.js`).
 - dnd5e's own capacity bar compares `capacity.weight.value` with contents weighed in the container's `weight.units`
   without converting. The module converts, so a container whose two units differ can show a bar that disagrees with

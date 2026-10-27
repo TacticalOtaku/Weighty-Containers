@@ -15,12 +15,9 @@ test("convertWeightToLbs converts supported units and preserves unknown units", 
   assert.equal(convertWeightToLbs(3, "stones"), 3);
 });
 
-test("ownWeightLbs supports object and legacy numeric weight shapes", () => {
+test("ownWeightLbs multiplies the unit weight by the quantity", () => {
   assert.equal(ownWeightLbs({
     system: { weight: { value: 2, units: "lb" }, quantity: 3 }
-  }), 6);
-  assert.equal(ownWeightLbs({
-    system: { weight: 2, quantity: 3 }
   }), 6);
 });
 
@@ -30,12 +27,10 @@ test("getReductionPct clamps invalid flag values", () => {
   assert.equal(getReductionPct({ flags: { "weighty-containers": { reductionPct: "bad" } } }), 0);
 });
 
-test("getCapacityLbs reads dnd5e and legacy capacity shapes", () => {
+test("getCapacityLbs reads dnd5e's weight capacity", () => {
   assert.equal(getCapacityLbs({
     system: { capacity: { weight: { value: 5, units: "kg" } } }
   }), 12.5);
-  assert.equal(getCapacityLbs({
-    system: { capacity: { value: 12, units: "lb" } }
-  }), 12);
-  assert.equal(getCapacityLbs({ system: { capacity: 7 } }), 7);
+  assert.equal(getCapacityLbs({ system: { capacity: { count: 20, weight: { value: 0 } } } }), null);
+  assert.equal(getCapacityLbs({ system: {} }), null);
 });

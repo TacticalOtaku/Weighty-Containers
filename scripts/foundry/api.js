@@ -3,6 +3,7 @@
 // ─────────────────────────────────────────────────────────
 
 import { MODULE_ID } from "../constants.js";
+import { computeContentsCount } from "../core/containers.js";
 import { getContainerRestrictions } from "../core/restrictions.js";
 import {
   getCapacityCount,
@@ -66,9 +67,14 @@ export function buildPublicApi({
    *
    * @param {Object} actor
    * @param {string} containerId
+   * `pct`, `isOver` and `hasCapacity` follow the limit dnd5e applies: the
+   * item count when the container declares one (`kind: "count"`), its weight
+   * otherwise.
+   *
    * @returns {{
    *   loadLbs: number, capacityLbs: number|null,
    *   load: number, capacity: number|null,
+   *   count: number, capacityCount: number|null, kind: "weight"|"count"|null,
    *   unit: string, reductionPct: number,
    *   pct: number|null, isOver: boolean, hasCapacity: boolean
    * }|null}
@@ -80,19 +86,26 @@ export function buildPublicApi({
 
     const { load } = computeAdjustedLoad(actor, containerId);
     const capacityLbs = getCapacityLbs(container);
-    const hasCapacity = typeof capacityLbs === "number" && capacityLbs > 0;
+    const hasWeightCapacity = typeof capacityLbs === "number" && capacityLbs > 0;
+    const capacityCount = getCapacityCount(container);
+    const count = computeContentsCount(actor, containerId);
+    const kind = capacityCount ? "count" : (hasWeightCapacity ? "weight" : null);
+    const [value, max] = kind === "count" ? [count, capacityCount] : [load, capacityLbs];
     const round = value => Number(Number(value).toFixed(2));
 
     return {
       loadLbs: round(load),
-      capacityLbs: hasCapacity ? round(capacityLbs) : null,
+      capacityLbs: hasWeightCapacity ? round(capacityLbs) : null,
       load: round(lbsToDisplay(load)),
-      capacity: hasCapacity ? round(lbsToDisplay(capacityLbs)) : null,
+      capacity: hasWeightCapacity ? round(lbsToDisplay(capacityLbs)) : null,
+      count,
+      capacityCount,
+      kind,
       unit: getSystemWeightUnit(),
       reductionPct: getReductionPct(container),
-      pct: hasCapacity ? Math.min(100, Math.max(0, Math.round((load / capacityLbs) * 100))) : null,
-      isOver: hasCapacity ? load > capacityLbs : false,
-      hasCapacity
+      pct: kind ? Math.min(100, Math.max(0, Math.round((value / max) * 100))) : null,
+      isOver: kind ? value > max : false,
+      hasCapacity: Boolean(kind)
     };
   }
 

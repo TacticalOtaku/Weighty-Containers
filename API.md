@@ -47,11 +47,19 @@ container's fill state, or `null` if the container is unknown.
   capacity: 15,       // same capacity, display unit; null when absent
   unit: "kg",         // "kg" | "lb"
   reductionPct: 50,   // 0..100
+  count: 12,          // items inside, sub-container contents included (dnd5e's contentsCount)
+  capacityCount: null,// item-count capacity; null when the container declares none
+  kind: "weight",     // the limit dnd5e applies: "count" | "weight" | null
   pct: 40,            // load/capacity, clamped 0..100; null without a capacity
   isOver: false,
   hasCapacity: true
 }
 ```
+
+`pct`, `isOver` and `hasCapacity` follow `kind`. dnd5e measures a container by
+its item count when it declares one and ignores its weight capacity, so a quiver
+for 20 arrows holding 25 is over even though `load` is far below `capacity`.
+Before 3.9.0 these three fields always followed weight.
 
 "Adjusted" means the container's weight reduction is applied and nested
 containers are walked. Do not recompute this from raw item weights — the two
@@ -95,6 +103,10 @@ subtype rule.
 Conversion uses `CONFIG.DND5E.weightUnits`, so a kilogram is **2.5 lb** — dnd5e's
 round conversion, not the physical 2.20462. Use `lbsToDisplay` rather than your
 own factor or your numbers will not match the sheet.
+
+Coins count as dnd5e counts them: an actor's coins in the display unit, a
+container's coins in the container's own `weight.units`. Before 3.9.0 both were
+taken as pounds, so metric worlds weighed coins at 1/2.5 of their weight.
 
 ### Classification and UI
 
@@ -153,10 +165,37 @@ await item.update({ "system.container": bagId }, {
 The rules dialog saves this way itself: a GM lowering a full bag's reduction is
 changing a rule, not stuffing an item in, and is never blocked by it.
 
+### Item Piles
+
+When [Item Piles](https://foundryvtt.com/packages/item-piles) is active (with or
+without its D&D 5e bridge), its transfers, trades, "take all" and added items
+are checked in its own pre-hooks (`item-piles-preTransferItems`,
+`-preTransferAllItems`, `-preTransferEverything`, `-preTradeItems`,
+`-preAddItems`). Item Piles removes items from the source before it creates
+them on the target, so a refusal there cancels the whole operation before
+anything moves, instead of losing the items half-way. A container taken with
+its contents is weighed full. In warn mode the operation runs and the warning
+is shown. Item Piles runs these operations on a GM
+client, so the receiving actor's active owners are notified as the acting user.
+Item Piles operations carry no bypass option; to skip the check, move the items
+yourself with the option above.
+
 Updates that cannot move weight or break a content rule - charges, equipped
 state, names, descriptions - are not checked at all. Only changes to `type`,
 `system.container`, `quantity`, `weight`, `capacity`, `currency`,
 `properties`, `system.type` or the module's flags are.
+
+## Behaviour changes in 3.9.0
+
+Fixes, so `apiVersion` stays at 2:
+
+- **Coins in metric worlds** weigh what dnd5e says (see [Weight](#weight)), so
+  loads and `computeActorCarriedLbs` rise where coins are carried.
+- **`getContainerLoad`** gained `count`, `capacityCount` and `kind`; `pct`,
+  `isOver` and `hasCapacity` follow an item-count capacity when one is set.
+- **`getCapacityLbs`** reads only dnd5e's `capacity.weight`. The pre-3.0
+  `capacity.value` and bare-number shapes, and object-shaped item properties,
+  are no longer read; dnd5e 5.3.3 migrates them away on load.
 
 ## Behaviour changes in 3.6.0
 
