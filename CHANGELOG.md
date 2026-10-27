@@ -1,6 +1,6 @@
 # Changelog
 
-## 3.9.0 (unreleased)
+## 3.9.0
 
 ### Added
 - Item Piles integration (with or without the Item Piles: D&D 5e bridge). Transfers, trades, "take all" and added
