@@ -1,7 +1,7 @@
 import { MODULE_ID } from "../constants.js";
-import { convertWeightToLbs, lbsPerUnit, lbsToUnit } from "./units.js";
+import { convertWeightToLbs } from "./units.js";
 
-export { convertWeightToLbs, lbsPerUnit, lbsToUnit };
+export { convertWeightToLbs };
 
 export function num(value, fallback = 0) {
   const parsed = Number(value);
@@ -13,14 +13,11 @@ export function clamp(value, minimum, maximum) {
 }
 
 export function getItemUnitWeight(item) {
-  const weight = item?.system?.weight;
-  if (weight == null) return 0;
-  return typeof weight === "object" ? num(weight.value, 0) : num(weight, 0);
+  return num(item?.system?.weight?.value, 0);
 }
 
 export function getItemWeightUnits(item) {
-  const weight = item?.system?.weight;
-  return weight && typeof weight === "object" ? weight.units || null : null;
+  return item?.system?.weight?.units || null;
 }
 
 export function getItemQuantity(item) {
@@ -75,23 +72,9 @@ export function getReductionPct(containerItem) {
  * @returns {number|null}
  */
 export function getCapacityLbs(containerItem, defaultUnit = "lb") {
-  const capacity = containerItem?.system?.capacity;
-  if (!capacity) return null;
-
-  if (capacity.weight?.value != null) {
-    const value = num(capacity.weight.value, 0);
-    if (value > 0) {
-      return convertWeightToLbs(value, capacity.weight.units, defaultUnit);
-    }
-  }
-
-  if (capacity.value != null && Number.isFinite(Number(capacity.value))) {
-    const valueLbs = convertWeightToLbs(capacity.value, capacity.units, defaultUnit);
-    if (valueLbs > 0) return valueLbs;
-  }
-
-  if (typeof capacity === "number" && capacity > 0) return capacity;
-  return null;
+  const weight = containerItem?.system?.capacity?.weight;
+  const value = num(weight?.value, 0);
+  return value > 0 ? convertWeightToLbs(value, weight.units, defaultUnit) : null;
 }
 
 /**

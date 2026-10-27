@@ -41,12 +41,10 @@ export function registerModuleSettings(logger) {
       restricted: true,
       type: Boolean,
       default: true,
-      // This setting changes the weight model itself, so it is not enough to
-      // redraw the container sheets that read it. Actor encumbrance is derived
-      // data: without a reset it keeps the old total until something else
-      // happens to re-prepare the actor.
+      // Only the capacity bar (computed when a container sheet renders) and
+      // enforcement read this; encumbrance always counts nested contents, so
+      // no actor needs re-preparing - redrawing open container sheets is enough.
       onChange: () => {
-        refreshPreparedActors(logger);
         for (const app of foundry.applications?.instances?.values() ?? []) {
           if (app.document?.type === "container" && app.rendered) app.render();
         }

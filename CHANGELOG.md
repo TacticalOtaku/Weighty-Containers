@@ -1,5 +1,27 @@
 # Changelog
 
+## 3.9.0 (unreleased)
+
+### Added
+- Item Piles integration (with or without the Item Piles: D&D 5e bridge). Transfers, trades, "take all" and added
+  items are checked in Item Piles' own pre-hooks and cancelled whole, before Item Piles removes anything from the
+  source. A refusal half-way through would have lost the items. A container taken with its contents is weighed full;
+  in warn mode it is warned about and goes through.
+- `api.getContainerLoad` returns `count`, `capacityCount` and `kind`.
+
+### Fixed
+- In metric worlds coins weighed 2.5 times too little: dnd5e's coin weight is in kilograms there, and the module
+  added it as pounds. A container's coins now count in its own weight units, an actor's in the display unit, as on
+  the sheet. Capacity checks and `api.computeActorCarriedLbs` were affected.
+- `api.getContainerLoad` judged a container with an item-count capacity by weight. `pct`, `isOver` and
+  `hasCapacity` now follow the count, as dnd5e does.
+
+### Changed
+- Toggling "Include nested containers" no longer re-prepares every actor and token: encumbrance does not depend on
+  it. Open container sheets are still redrawn.
+- Pre-dnd5e 3.0 data shapes (`capacity.value`, a bare-number capacity or weight, object-shaped properties) are no
+  longer read; dnd5e 5.3.3 migrates them on load.
+
 ## 3.8.0
 
 ### Fixed

@@ -1,4 +1,4 @@
-import { lbsToUnit, setUnitConversionTable } from "../core/units.js";
+import { convertWeightToLbs, lbsToUnit, setUnitConversionTable } from "../core/units.js";
 
 export const CONTAINER_DATA_MODEL_PATH = "CONFIG.Item.dataModels.container";
 
@@ -75,11 +75,10 @@ export function isCurrencyWeightEnabled() {
 /**
  * Weight of a currency block, reproducing dnd5e's own arithmetic.
  *
- * Note the unit: dnd5e divides the coin count by a per-unit constant chosen
- * from the *display* unit and then adds the result straight into a pound-
- * denominated sum, without converting. That is a quirk of the system, but the
- * module's job is to agree with the sheet standing next to it, so we reproduce
- * it rather than "fix" it here.
+ * The result is in the *display* unit (kg when dnd5e shows metric weights),
+ * because dnd5e divides the coin count by that unit's coins-per-weight. The
+ * Item Piles D&D 5e bridge keeps coins in the same `system.currency` fields,
+ * so coins it moves weigh the same.
  *
  * @param {Object} currency  `{ pp, gp, ep, sp, cp }`
  * @returns {number}
@@ -98,16 +97,22 @@ export function currencyWeightOf(currency) {
   return count / divisor;
 }
 
-/** Weight of the coins inside a container. Prefers the system's own getter. */
+/**
+ * Weight of the coins inside a container, in pounds. Prefers the system's own
+ * getter. dnd5e adds that number to the contents without converting, so it
+ * counts in the container's own weight units, and is read in them here.
+ */
 export function containerCurrencyLbs(containerItem) {
   const own = containerItem?.system?.currencyWeight;
-  if (typeof own === "number" && Number.isFinite(own)) return own;
-  return currencyWeightOf(containerItem?.system?.currency);
+  const weight = typeof own === "number" && Number.isFinite(own)
+    ? own
+    : currencyWeightOf(containerItem?.system?.currency);
+  return convertWeightToLbs(weight, containerItem?.system?.weight?.units, getSystemWeightUnit());
 }
 
-/** Weight of the coins an actor carries directly. */
+/** Weight of the coins an actor carries directly, in pounds. */
 export function actorCurrencyLbs(actor) {
-  return currencyWeightOf(actor?.system?.currency);
+  return convertWeightToLbs(currencyWeightOf(actor?.system?.currency), getSystemWeightUnit());
 }
 
 /**

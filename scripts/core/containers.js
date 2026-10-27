@@ -247,20 +247,18 @@ export function computeActorCarriedLbs(
 }
 
 /**
- * The actor as it would look after one item change.
+ * The actor as it would look after a change to one or more items.
  *
  * @param {Object} actor
- * @param {Object} candidateItem  The changed or created item.
+ * @param {Object|Object[]} candidateItems  The changed or created items.
  */
-export function createProjectedActor(actor, candidateItem) {
-  const id = candidateItem?.id;
-  let replaced = false;
-  const items = Array.from(actor?.items ?? [], item => {
-    if (!id || item.id !== id) return item;
-    replaced = true;
-    return candidateItem;
-  });
-  if (!replaced) items.push(candidateItem);
+export function createProjectedActor(actor, candidateItems) {
+  const candidates = [].concat(candidateItems);
+  const byId = new Map(candidates.filter(item => item?.id).map(item => [item.id, item]));
+  const items = Array.from(actor?.items ?? [], item => byId.get(item.id) ?? item);
+  for (const candidate of candidates) {
+    if (!candidate?.id || !getItem(actor, candidate.id)) items.push(candidate);
+  }
   return { items: new ItemCollectionView(items) };
 }
 

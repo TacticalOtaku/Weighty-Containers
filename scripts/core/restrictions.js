@@ -28,14 +28,9 @@ export function getContainerRestrictions(containerItem) {
 export function getItemPropertyTokens(itemData) {
   const properties = itemData?.system?.properties;
   const tokens = new Set();
+  // dnd5e keeps properties in a Set; `toObject()` data carries them as an array.
   if (properties instanceof Set || Array.isArray(properties)) {
     for (const property of properties) tokens.add(normalizeToken(property));
-  } else if (properties && typeof properties === "object") {
-    for (const [key, value] of Object.entries(properties)) {
-      if (value) tokens.add(normalizeToken(key));
-    }
-  } else if (properties) {
-    tokens.add(normalizeToken(properties));
   }
   tokens.delete("");
   return tokens;

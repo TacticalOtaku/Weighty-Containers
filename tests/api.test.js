@@ -9,6 +9,7 @@ import {
   installPublicApi,
   notifyContainerRulesUpdated
 } from "../scripts/foundry/api.js";
+import { ItemCollectionView } from "../scripts/core/containers.js";
 
 const LBS_PER_KG = 2.20462;
 
@@ -90,6 +91,28 @@ test("getContainerLoad flags an overfilled container", () => {
   const load = api.getContainerLoad(makeActor(container), "bag");
   assert.equal(load.isOver, true);
   assert.equal(load.pct, 100, "the meter percentage is clamped");
+});
+
+test("getContainerLoad follows an item-count capacity, as dnd5e does", () => {
+  const quiver = {
+    id: "quiver",
+    type: "container",
+    flags: {},
+    system: { capacity: { count: 20, weight: { value: 50, units: "lb" } } }
+  };
+  const arrows = { id: "arrows", type: "consumable", system: { container: "quiver", quantity: 25 } };
+  const api = buildPublicApi(makeDeps({
+    computeAdjustedLoad: () => ({ load: 1.25, trace: [] }),
+    getCapacityLbs: () => 50
+  }));
+
+  const load = api.getContainerLoad({ items: new ItemCollectionView([quiver, arrows]) }, "quiver");
+  assert.equal(load.kind, "count");
+  assert.equal(load.count, 25);
+  assert.equal(load.capacityCount, 20);
+  assert.equal(load.isOver, true);
+  assert.equal(load.pct, 100);
+  assert.equal(load.capacityLbs, 50, "the declared weight capacity is still reported");
 });
 
 test("getContainerLoad copes with a container that declares no capacity", () => {
