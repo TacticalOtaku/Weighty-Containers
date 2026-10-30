@@ -42,6 +42,7 @@ export const HOOK_UPDATE_RULES = `${MODULE_ID}.updateContainerRules`;
  * @param {Object} deps
  * @param {(actor: Object) => number} deps.computeActorCarriedLbs
  * @param {(actor: Object, containerId: string) => {load: number, trace: Array}} deps.computeAdjustedLoad
+ * @param {(actor: Object, item: Object) => number} deps.getCarriedShare
  * @param {(container: Object) => number|null} deps.getCapacityLbs
  * @param {(lbs: number) => number} deps.lbsToDisplay
  * @param {() => string} deps.getSystemWeightUnit
@@ -52,6 +53,7 @@ export const HOOK_UPDATE_RULES = `${MODULE_ID}.updateContainerRules`;
 export function buildPublicApi({
   computeActorCarriedLbs,
   computeAdjustedLoad,
+  getCarriedShare,
   getCapacityLbs,
   lbsToDisplay,
   getSystemWeightUnit,
@@ -128,6 +130,7 @@ export function buildPublicApi({
     getContainerLoad,
     computeAdjustedLoad,
     computeActorCarriedLbs,
+    getCarriedShare,
     lbsToDisplay,
     getSystemWeightUnit,
 

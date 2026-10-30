@@ -5,7 +5,8 @@
 import { MODULE_ID } from "./constants.js";
 import {
   computeActorCarriedLbs as computeActorCarriedLbsCore,
-  computeAdjustedLoad as computeAdjustedLoadCore
+  computeAdjustedLoad as computeAdjustedLoadCore,
+  getCarriedShare as getCarriedShareCore
 } from "./core/containers.js";
 import {
   validateContainerRestrictions as validateContainerRestrictionsCore
@@ -77,6 +78,11 @@ function computeActorCarriedLbs(actor) {
   });
 }
 
+// Matches computeActorCarriedLbs above, so no includeNested here either.
+function getCarriedShare(actor, item) {
+  return getCarriedShareCore(actor, item, { validateItem: makeEncumbranceItemFilter(actor) });
+}
+
 function validateContainerRestrictions(containerItem, itemData) {
   return validateContainerRestrictionsCore(containerItem, itemData, {
     weaponTypeMap: getWeaponTypeMap()
@@ -107,6 +113,7 @@ Hooks.once("ready", () => {
   installPublicApi({
     computeActorCarriedLbs,
     computeAdjustedLoad,
+    getCarriedShare,
     getCapacityLbs,
     getSystemWeightUnit,
     lbsToDisplay,

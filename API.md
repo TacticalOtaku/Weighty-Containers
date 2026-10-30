@@ -97,6 +97,15 @@ subtype rule.
 - `computeActorCarriedLbs(actor)` → number — the actor's carried weight. It
   always counts nested contents, matching the sheet's encumbrance; since 3.8.0
   the `includeNested` setting no longer lowers it.
+- `getCarriedShare(actor, item)` → number from 0 to 1 — how much of the item's
+  own total weight its actor carries, counted as `computeActorCarriedLbs`
+  counts it. Multiply the item's weight by it. 1 outside any container; each
+  container's reduction compounds up the chain (a 50% pouch in a 50% bag gives
+  0.25); 0 inside a `weightlessContents` container anywhere up the chain, on a
+  vehicle mount that does not count toward encumbrance, and when the chain is
+  broken (a missing container or a cycle). Like `computeActorCarriedLbs`, it
+  ignores the `includeNested` setting. Absent in 3.9.0 and earlier, so feature-detect
+  it.
 - `lbsToDisplay(lbs)` → number in the client's display unit
 - `getSystemWeightUnit()` → `"kg" | "lb"`
 
