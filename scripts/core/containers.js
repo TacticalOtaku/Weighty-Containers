@@ -247,6 +247,37 @@ export function computeActorCarriedLbs(
 }
 
 /**
+ * Share (0 to 1) of an item's own total weight that its actor carries, as
+ * {@link computeActorCarriedLbs} counts it: each container's reduction
+ * compounds up the chain, a `weightlessContents` container anywhere above
+ * hides it, and with `includeNested` off anything below the first container
+ * level drops out. An item whose chain never reaches the actor (a missing
+ * container, a cycle) counts 0.
+ *
+ * @param {Object} actor
+ * @param {Object} item
+ * @param {Object} [options]  `includeNested` and `validateItem` as for
+ *   {@link computeActorCarriedLbs}.
+ * @returns {number}
+ */
+export function getCarriedShare(actor, item, { includeNested = true, validateItem = null } = {}) {
+  if (!item) return 0;
+  let share = 1;
+  let current = item;
+  const visited = new Set();
+  for (let depth = 0; current.system?.container; depth++) {
+    if ((depth && !includeNested) || visited.has(current.id)) return 0;
+    visited.add(current.id);
+    const container = getItem(actor, current.system.container);
+    if (!isContainer(container) || isWeightlessContainer(container)) return 0;
+    share *= 1 - getReductionPct(container) / 100;
+    current = container;
+  }
+  if (validateItem && !validateItem(current)) return 0;
+  return share;
+}
+
+/**
  * The actor as it would look after a change to one or more items.
  *
  * @param {Object} actor
