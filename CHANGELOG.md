@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.10.0
 
 ### Added
 - `api.getCarriedShare(actor, item)`: the share (0 to 1) of an item's weight that its actor carries, with reductions,
