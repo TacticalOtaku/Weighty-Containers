@@ -17,6 +17,7 @@ function makeDeps(overrides = {}) {
   return {
     computeActorCarriedLbs: () => 0,
     computeAdjustedLoad: () => ({ load: 0, trace: [] }),
+    getCarriedShare: () => 1,
     getCapacityLbs: () => null,
     lbsToDisplay: lbs => lbs,
     getSystemWeightUnit: () => "lb",
@@ -45,12 +46,27 @@ test("public api exposes the documented surface", () => {
     "getContainerLoad",
     "computeAdjustedLoad",
     "computeActorCarriedLbs",
+    "getCarriedShare",
     "lbsToDisplay",
     "getSystemWeightUnit",
     "openRulesDialog"
   ]) {
     assert.equal(typeof api[name], "function", `${name} must be callable`);
   }
+});
+
+test("getCarriedShare is passed through from the host", () => {
+  const calls = [];
+  const api = buildPublicApi(makeDeps({
+    getCarriedShare: (...args) => {
+      calls.push(args);
+      return 0.25;
+    }
+  }));
+  const actor = { items: new Map() };
+  const gem = { id: "gem" };
+  assert.equal(api.getCarriedShare(actor, gem), 0.25);
+  assert.deepEqual(calls, [[actor, gem]]);
 });
 
 test("openReductionDialog stays available for pre-API callers", async () => {
