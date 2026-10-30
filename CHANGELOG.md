@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.10.0
+
+### Added
+- `api.getCarriedShare(actor, item)`: the share (0 to 1) of an item's weight that its actor carries, with reductions,
+  `weightlessContents` and the encumbrance filter applied as in `api.computeActorCarriedLbs`. Lets other modules
+  show an actor's load after a change without re-implementing the container walk.
+
 ## 3.9.0
 
 ### Added
