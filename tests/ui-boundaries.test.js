@@ -1,40 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-test("rule presentation exposes saved-value group preparation", async () => {
-  globalThis.game = {
-    i18n: { localize: key => key }
-  };
-  const { prepareRuleGroups } = await import("../scripts/ui/rule-presentation.js");
-  const groups = [{
-    key: "known",
-    label: "Known",
-    options: [{ value: "weapon", label: "Weapon" }]
-  }];
-
-  assert.deepEqual(prepareRuleGroups(groups, ["weapon", "custom"]), [
-    groups[0],
-    {
-      key: "savedValues",
-      label: "WC.configDialog.groups.savedValues",
-      options: [{ value: "custom", label: "custom" }],
-      saved: true,
-      types: []
-    }
-  ]);
-});
-
-test("container rules window starts centered at its intended size", async () => {
-  const { getCenteredWindowPosition } = await import("../scripts/ui/window-position.js");
-
-  assert.deepEqual(getCenteredWindowPosition(1770, 1329), {
-    width: 880,
-    height: 720,
-    left: 445,
-    top: 305
-  });
-});
-
 test("public dialog opener returns a rendered and centered ApplicationV2", async () => {
   class ApplicationV2 {
     // Real ApplicationV2 declares tabGroups as a class field seeded from

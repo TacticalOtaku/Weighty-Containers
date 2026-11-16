@@ -1,28 +1,73 @@
 import { I18N, MODULE_ID, PREVIEW_BASE_WEIGHT } from "../constants.js";
 import {
-  getRawContentsWeight,
-  getWeightUnitLabel
-} from "../integrations/dnd5e.js";
-import { getRulePreset, listRulePresets } from "./rule-presets.js";
-import { clamp, num } from "../core/weight.js";
+  RULE_SELECTION_NAMES,
+  containerConfigMatches,
+  getRulePreset,
+  listRulePresets,
+  makeContainerConfigUpdate,
+  normalizeReductionPct
+} from "../core/rules.js";
 import { notifyContainerRulesUpdated } from "../foundry/api.js";
+import { getContainerRawPreviewWeight } from "../foundry/containers.js";
 import { bypassOption } from "../foundry/enforcement.js";
 import { LOG } from "../foundry/logger.js";
+import { getModuleSetting, setModuleSetting } from "../foundry/runtime.js";
+import { getWeightUnitLabel } from "../integrations/dnd5e.js";
 import {
-  containerConfigMatches,
+  ContainerRulesMultiselectController,
   escapeHtml,
-  makeContainerConfigUpdate,
   renderRuleMultiselect
-} from "./rule-presentation.js";
+} from "./container-rules-multiselect.js";
 import { ContainerRulesState } from "./container-rules-state.js";
-import { RULE_TAB_GROUP, RULE_TABS, ruleTabsConfig } from "./rule-tabs.js";
-import { ContainerRulesMultiselectController } from "./container-rules-multiselect.js";
-import {
-  CONTAINER_RULES_WINDOW_SIZE,
-  getCenteredWindowPosition
-} from "./window-position.js";
 
 const OPEN_CONTAINER_RULE_APPS = new Map();
+
+const DEFAULT_WINDOW_WIDTH = 880;
+const DEFAULT_WINDOW_HEIGHT = 720;
+const MIN_WINDOW_WIDTH = 360;
+const MIN_WINDOW_HEIGHT = 440;
+const VIEWPORT_MARGIN = 24;
+
+function getCenteredWindowPosition(viewportWidth, viewportHeight) {
+  const availableWidth = Math.max(MIN_WINDOW_WIDTH, viewportWidth - (VIEWPORT_MARGIN * 2));
+  const availableHeight = Math.max(MIN_WINDOW_HEIGHT, viewportHeight - (VIEWPORT_MARGIN * 2));
+  const width = Math.min(DEFAULT_WINDOW_WIDTH, availableWidth);
+  const height = Math.min(DEFAULT_WINDOW_HEIGHT, availableHeight);
+
+  return {
+    width,
+    height,
+    left: Math.max(0, Math.round((viewportWidth - width) / 2)),
+    top: Math.max(0, Math.round((viewportHeight - height) / 2))
+  };
+}
+
+const RULE_TAB_GROUP = "primary";
+const RULE_TABS = Object.freeze([
+  {
+    id: "presets",
+    icon: "fa-solid fa-wand-magic-sparkles",
+    label: `${I18N}.presets.label`,
+    gmOnly: true
+  },
+  {
+    id: "restrictions",
+    icon: "fa-solid fa-shield-halved",
+    label: `${I18N}.configDialog.sections.restrictions`,
+    badge: "restrictions"
+  },
+  {
+    id: "properties",
+    icon: "fa-solid fa-tags",
+    label: `${I18N}.configDialog.sections.properties`,
+    badge: "properties"
+  }
+]);
+
+function ruleTabsConfig({ readOnly = false } = {}) {
+  const tabs = RULE_TABS.filter(tab => !(readOnly && tab.gmOnly));
+  return { tabs, initial: tabs[0]?.id };
+}
 
 /** DOM-safe window id. The uuid keeps two unlinked tokens of one actor apart. */
 function rulesWindowId(containerItem) {
@@ -30,6 +75,7 @@ function rulesWindowId(containerItem) {
     ?? `${containerItem.parent?.id ?? "world"}.${containerItem.id}`;
   return `${MODULE_ID}-rules-${String(key).replace(/[^A-Za-z0-9_-]/g, "-")}`;
 }
+
 const ContainerRulesApplication = foundry.applications.api.HandlebarsApplicationMixin(
   foundry.applications.api.ApplicationV2
 );
@@ -40,7 +86,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
     // `anvil` opts this window into the design system in styles/anvil.css.
     classes: ["container-rules", "anvil"],
     tag: "form",
-    position: { ...CONTAINER_RULES_WINDOW_SIZE },
+    position: { width: DEFAULT_WINDOW_WIDTH, height: DEFAULT_WINDOW_HEIGHT },
     window: {
       icon: "fa-solid fa-gear",
       minimizable: true,
@@ -104,8 +150,6 @@ class ContainerRulesApp extends ContainerRulesApplication {
     this.readOnly = options.readOnly ?? !game.user?.isGM;
     // ApplicationV2 seeds tabGroups from `static TABS` in a class field
     // initialiser, which runs before this body and cannot know who is looking.
-    // Left alone, a player's window opens on the GM-only presets tab, which is
-    // not in their DOM — so no pane is active and the window renders blank.
     this.tabGroups[RULE_TAB_GROUP] = ruleTabsConfig({ readOnly: this.readOnly }).initial;
     this.rules = ContainerRulesState.fromItem(containerItem);
     this.multiselect = new ContainerRulesMultiselectController({
@@ -146,7 +190,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
         return;
       }
       this.rules = ContainerRulesState.fromItem(item);
-      this.multiselect.rules = this.rules;
+      this.multiselect.setRules(this.rules);
       this._initialSnapshot = this.rules.snapshot();
       this.render();
     };
@@ -167,14 +211,13 @@ class ContainerRulesApp extends ContainerRulesApplication {
   /**
    * What the reduction slider previews against.
    *
-   * The container's real contents when they can be read - a GM setting a bag
-   * of holding wants to see "13.5 -> 6.8 lb", not an abstract sample - falling
-   * back to the sample weight for an empty or compendium container.
+   * The container's real contents when they can be read, falling back to the
+   * sample weight for an empty or compendium container.
    */
   _previewBasis() {
-    const raw = getRawContentsWeight(this.containerItem);
-    const unit = getWeightUnitLabel(this.containerItem?.system?.weight?.units);
-    if (typeof raw === "number" && raw > 0) return { base: raw, unit, actual: true };
+    const preview = getContainerRawPreviewWeight(this.containerItem);
+    const unit = preview?.unit ?? getWeightUnitLabel(this.containerItem?.system?.weight?.units);
+    if (preview && preview.raw > 0) return { base: preview.raw, unit, actual: true };
     return { base: PREVIEW_BASE_WEIGHT, unit, actual: false };
   }
 
@@ -184,19 +227,11 @@ class ContainerRulesApp extends ContainerRulesApplication {
 
   /** The stored preference, defaulting to following Foundry. */
   get theme() {
-    try {
-      return game.settings.get(MODULE_ID, "theme") ?? "auto";
-    } catch {
-      return "auto";
-    }
+    return getModuleSetting("theme") ?? "auto";
   }
 
   /**
    * Pin the window to a theme, or let it follow Foundry.
-   *
-   * `auto` removes the attribute rather than setting it, so the CSS
-   * falls through to Foundry's body class and, failing that, to the
-   * operating system — with no JS involved in the decision.
    */
   applyAnvilTheme() {
     const root = this.element;
@@ -211,24 +246,16 @@ class ContainerRulesApp extends ContainerRulesApplication {
 
   /**
    * A one-line description of what a preset actually sets.
-   *
-   * "Quiver" tells a GM nothing on its own. Reading the preset's own config
-   * back into labels means third-party presets get a description too, without
-   * their authors having to write one.
    */
   _describePreset(config = {}) {
     const bits = [];
     if (typeof config.reductionPct === "number") {
       bits.push(`${config.reductionPct}%`);
     }
-    for (const name of ["allowedTypes", "allowedSubtypes", "requiredProperties", "forbiddenProperties"]) {
+    for (const name of RULE_SELECTION_NAMES) {
       const values = config[name];
       if (!Array.isArray(values) || !values.length) continue;
-      const labels = new Map();
-      for (const group of this.rules.catalogs[name] ?? []) {
-        for (const option of group.options) labels.set(String(option.value).toLowerCase(), option.label);
-      }
-      const named = values.map(value => labels.get(String(value).toLowerCase()) ?? value);
+      const named = this.rules.labelsFor(name, values).map(entry => entry.label);
       bits.push(named.slice(0, 2).join(", ") + (named.length > 2 ? ` +${named.length - 2}` : ""));
     }
     return bits.join(" · ");
@@ -236,9 +263,6 @@ class ContainerRulesApp extends ContainerRulesApplication {
 
   /**
    * Presets are GM-only, so a player's window has two tabs, not three.
-   *
-   * This is an instance method on ApplicationV2 precisely so it can vary per
-   * viewer; `static TABS` alone cannot know who is looking.
    */
   _getTabsConfig(group) {
     if (group !== RULE_TAB_GROUP) return super._getTabsConfig(group);
@@ -346,11 +370,6 @@ class ContainerRulesApp extends ContainerRulesApplication {
     this._refreshAll();
     this._applyReadOnly();
 
-    // PARTS.content.scrollable restores the pane before this method runs, which
-    // covers the common case. It cannot cover this one: _refreshAll draws the
-    // selection chips just above, so at restore time the pane was shorter than
-    // it now is and the position was clamped to fit. Re-assert the value we
-    // recorded while the user was actually scrolling.
     const panes = this.element.querySelector(".cr-panes");
     if (panes && this._paneScroll && panes.scrollTop !== this._paneScroll) {
       panes.scrollTop = this._paneScroll;
@@ -359,8 +378,6 @@ class ContainerRulesApp extends ContainerRulesApplication {
       if (this.element !== renderedElement || !renderedElement.isConnected) return;
       renderedElement.classList.add("cr-ready");
       this._motionReady = true;
-      // The bar has its final width only after layout, so the marker is
-      // placed once more here rather than guessed during render.
       this._positionTabMarker();
     });
   }
@@ -460,7 +477,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
   static async _setTheme(event, target) {
     const theme = target.dataset.theme;
     if (!["auto", "light", "dark"].includes(theme) || theme === this.theme) return;
-    await game.settings.set(MODULE_ID, "theme", theme);
+    await setModuleSetting("theme", theme);
     this.applyAnvilTheme();
   }
 
@@ -469,7 +486,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
     const preset = getRulePreset(target.dataset.presetId);
     if (!preset) return;
     const touched = this.rules.applyConfig(preset.config);
-    for (const name of touched) this.multiselect.syncSelection(name);
+    this.multiselect.syncInputs(touched);
     for (const input of this.element.querySelectorAll(
       '[name="reductionPct"], [name="reductionRange"]'
     )) {
@@ -511,8 +528,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
       return;
     }
     if (!target.matches('[name="reductionPct"], [name="reductionRange"]')) return;
-    const value = clamp(Math.round(num(target.value, 0)), 0, 100);
-    this.rules.setReductionPct(value);
+    const value = this.rules.setReductionPct(target.value);
     for (const input of this.element.querySelectorAll('[name="reductionPct"], [name="reductionRange"]')) {
       if (input !== target) input.value = value;
     }
@@ -556,7 +572,8 @@ class ContainerRulesApp extends ContainerRulesApplication {
     if (numeric && event.shiftKey && ["ArrowUp", "ArrowDown"].includes(event.key)) {
       event.preventDefault();
       const delta = event.key === "ArrowUp" ? 5 : -5;
-      numeric.value = clamp(num(numeric.value, 0) + delta, 0, 100);
+      const current = Number(numeric.value);
+      numeric.value = normalizeReductionPct((Number.isFinite(current) ? current : 0) + delta);
       numeric.dispatchEvent(new Event("input", { bubbles: true }));
       return;
     }
@@ -592,10 +609,8 @@ class ContainerRulesApp extends ContainerRulesApplication {
     const labels = this.rules.selectionLabels("requiredProperties")
       .filter(entry => conflicts.includes(entry.value))
       .map(entry => entry.label);
+    this.multiselect.setPropertyError(this._hasErrors);
     for (const name of ["requiredProperties", "forbiddenProperties"]) {
-      const root = this.multiselect.root(name);
-      root?.classList.toggle("is-invalid", this._hasErrors);
-      root?.querySelector(".cr-combobox")?.setAttribute("aria-invalid", String(this._hasErrors));
       const error = this.element.querySelector(`[data-property-error="${name}"]`);
       if (!error) continue;
       error.hidden = !this._hasErrors;
@@ -697,10 +712,6 @@ class ContainerRulesApp extends ContainerRulesApplication {
 
   /**
    * Show one pane and move the tab marker to it.
-   *
-   * The marker is a single element translated across the bar rather than a
-   * border on each tab, so the indicator slides on the compositor instead of
-   * repainting three buttons.
    */
   _selectTab(name, { focus = true } = {}) {
     const group = RULE_TAB_GROUP;
@@ -745,7 +756,7 @@ class ContainerRulesApp extends ContainerRulesApplication {
     this._refreshPropertyConflicts();
     if (this._hasErrors) {
       this._selectTab("properties");
-      this.multiselect.root("requiredProperties")?.querySelector(".cr-combobox")?.focus();
+      this.multiselect.focusSelect("requiredProperties");
       return;
     }
 

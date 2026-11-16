@@ -1,6 +1,10 @@
-import { buildContainerIndex } from "../core/containers.js";
-import { getContainerRestrictions } from "../core/restrictions.js";
-import { getReductionPct, isContainer } from "../core/weight.js";
+import { getContainerRestrictions, getReductionPct } from "../core/rules.js";
+import { lbsToDisplay } from "../integrations/dnd5e.js";
+import {
+  computeAdjustedLoad,
+  getCapacityLbs,
+  summarizeActorContainers
+} from "./containers.js";
 import { LOG } from "./logger.js";
 
 /**
@@ -12,11 +16,7 @@ import { LOG } from "./logger.js";
  *
  * @returns {Object} the debug helpers
  */
-export function buildDebugApi({
-  computeAdjustedLoad,
-  getCapacityLbs,
-  lbsToDisplay
-}) {
+export function buildDebugApi() {
   const findOpenApps = () => {
     if (!(foundry.applications?.instances instanceof Map)) return [];
     return Array.from(foundry.applications.instances.values());
@@ -89,22 +89,7 @@ export function buildDebugApi({
         console.warn("No actor — select a token");
         return;
       }
-      const index = buildContainerIndex(actor);
-      const result = {};
-      for (const item of actor.items) {
-        if (!isContainer(item)) continue;
-        const { load, trace } = computeAdjustedLoad(actor, item.id, index);
-        result[item.name] = {
-          id: item.id,
-          capacityLbs: getCapacityLbs(item),
-          loadLbs: load,
-          loadDisplay: Number(lbsToDisplay(load).toFixed(2)),
-          reductionPct: getReductionPct(item),
-          contentsWeight: item.system.contentsWeight,
-          totalWeight: item.system.totalWeight,
-          trace
-        };
-      }
+      const result = summarizeActorContainers(actor);
       console.table(result);
       return result;
     }

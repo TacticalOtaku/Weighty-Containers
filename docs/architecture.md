@@ -7,27 +7,27 @@ The public API is documented in [`API.md`](../API.md), the window design system 
 
 ```text
 scripts/
-  main.js            composition root: settings, the ContainerData patch, socket, hooks, public API
+  main.js            composition root: startup hooks for settings, ContainerData patch, enforcement, sheet UI and public API
   constants.js       MODULE_ID, I18N (localisation root "WC"), log levels
   core/              pure logic — no game/ui/Hooks access, unit tested in plain Node
-    weight.js          own weight, capacity and unit conversion
-    containers.js      adjusted load of a container and an actor's carried weight (cycles detected)
-    restrictions.js    content rules: types, subtypes, required and forbidden properties
-    units.js
+    weight.js          stateless unit conversion, own weight, capacity
+    rules.js           container rule schema, flag persistence mapping, content validation, rule presets
+    containers.js      adjusted/direct load, actor carried weight, carried share, change evaluation (cycles detected)
   integrations/
-    dnd5e.js         weight units, weapon types, currency weight, encumbrance item filter
-    item-piles.js    Item Piles pre-hooks that put items on an actor (optional module)
+    dnd5e.js           weight units, rule catalogs & labels, weapon types, currency weight, encumbrance item filter
+    item-piles.js      Item Piles pre-hooks that put items on an actor (optional module)
   foundry/           everything that touches the Foundry runtime
-    runtime.js         settings, dnd5e unit table, the ContainerData patch
-    enforcement.js     preCreateItem / preUpdateItem rules and notifications
-    socket.js          socketlib facade with a native-socket fallback
+    runtime.js         module settings defaults & safe readers, the ContainerData patch
+    containers.js      host-bound container operations binding core, dnd5e and runtime settings
+    enforcement.js     preCreateItem / preUpdateItem rules and socket notifications
     api.js             the public API object and its hooks
+    socket.js          socketlib facade with a native-socket fallback
     logger.js, debug.js
-  ui/                the container rules window (ApplicationV2) and its state, tabs, presets, multiselect
+  ui/                the container rules window (ApplicationV2), state, unified multiselect widget and sheet hooks
 ```
 
 The dependency direction is one-way: `ui` → `foundry` / `integrations` → `core`. Core functions receive what they
-need from the runtime as arguments (`computeAdjustedLoadCore(actor, id, { defaultUnit, currencyLbs, onCycle })`).
+need from the runtime as arguments (`computeAdjustedLoad(actor, id, { defaultUnit, unitTable, currencyLbs, onCycle })`).
 
 ## How the reduction reaches dnd5e
 
@@ -41,9 +41,10 @@ relies on the same table; any other factor makes the two modules disagree.
 
 ## Enforcement
 
-`preCreateItem` and `preUpdateItem` project the change and check capacity and content rules. Updates that touch no
-weight- or rule-relevant path skip the projection. The `enforceMode` world setting decides between blocking and
-warning. Other modules and macros can bypass a check with the operation option `{ "weighty-containers": { bypass: true } }`.
+`preCreateItem` and `preUpdateItem` project the change and pass candidates to `core/containers.js#evaluateContainerChanges`.
+Updates that touch no weight- or rule-relevant path skip the projection. The `enforceMode` world setting decides between
+blocking and warning. Other modules and macros can bypass a check with the operation option
+`{ "weighty-containers": { bypass: true } }`.
 
 With Item Piles active, its transfers, trades and added items are checked as one batch in its own pre-hooks
 (`integrations/item-piles.js`). Item Piles deletes from the source before it creates on the target, so the check
@@ -68,7 +69,8 @@ keep the module id.
 
 `npm run check` runs ESLint and the `node --test` suite. `tools/preview-ui.mjs` renders the real templates in both
 themes for visual review, and `tools/check-multiselect.mjs` drives the option lists with mouse and keyboard in a real
-browser; both take `<Foundry resources/app> <node_modules with playwright>` and need Edge.
+browser; both take `<Foundry resources/app> <node_modules with playwright>` and launch Playwright's Chromium (with
+fallback to Edge, or `PLAYWRIGHT_CHANNEL` / `PLAYWRIGHT_EXECUTABLE_PATH`).
 `tests/manual/foundry-v14-smoke.md` is the in-world scenario.
 
 ## Known limits

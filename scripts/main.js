@@ -2,92 +2,14 @@
 // Weighty Containers - Foundry VTT v14.367 / dnd5e 5.3.3
 // ─────────────────────────────────────────────────────────
 
-import { MODULE_ID } from "./constants.js";
-import {
-  computeActorCarriedLbs as computeActorCarriedLbsCore,
-  computeAdjustedLoad as computeAdjustedLoadCore,
-  getCarriedShare as getCarriedShareCore
-} from "./core/containers.js";
-import {
-  validateContainerRestrictions as validateContainerRestrictionsCore
-} from "./core/restrictions.js";
-import { getCapacityLbs as resolveCapacityLbs } from "./core/weight.js";
 import { installPublicApi } from "./foundry/api.js";
-import { buildDebugApi } from "./foundry/debug.js";
 import { registerEnforcementHooks, renderRejection } from "./foundry/enforcement.js";
 import { LOG } from "./foundry/logger.js";
-import {
-  registerContainerPatch,
-  registerModuleSettings,
-  registerUnitConversion
-} from "./foundry/runtime.js";
+import { registerContainerPatch, registerModuleSettings } from "./foundry/runtime.js";
 import { WCSocket } from "./foundry/socket.js";
-import {
-  actorCurrencyLbs,
-  containerCurrencyLbs,
-  getSystemWeightUnit,
-  getWeaponTypeMap,
-  lbsToDisplay,
-  makeEncumbranceItemFilter
-} from "./integrations/dnd5e.js";
-import { openReductionDialog } from "./ui/container-rules-app.js";
 import { registerSheetUiHooks } from "./ui/sheet-hooks.js";
 
-const wcSocket = new WCSocket(LOG);
-
-function includeNested() {
-  try {
-    return game.settings.get(MODULE_ID, "includeNested");
-  } catch {
-    return true;
-  }
-}
-
-function getCapacityLbs(containerItem) {
-  const capacityLbs = resolveCapacityLbs(containerItem, getSystemWeightUnit());
-  if (capacityLbs == null) {
-    LOG.debug("capacity not resolved", {
-      item: containerItem?.name,
-      capacity: containerItem?.system?.capacity
-    });
-  }
-  return capacityLbs;
-}
-
-function computeAdjustedLoad(actor, containerId, idx = null, memo = null, visited = null) {
-  return computeAdjustedLoadCore(actor, containerId, {
-    includeNested: includeNested(),
-    defaultUnit: getSystemWeightUnit(),
-    index: idx,
-    memo,
-    visited,
-    currencyLbs: containerCurrencyLbs,
-    onCycle: cycleId => LOG.warn("Cycle detected", { containerId: cycleId })
-  });
-}
-
-// No includeNested here: that setting only shapes container capacity. Carried
-// weight always counts nested contents, exactly as the patched sheet does.
-function computeActorCarriedLbs(actor) {
-  return computeActorCarriedLbsCore(actor, {
-    defaultUnit: getSystemWeightUnit(),
-    validateItem: makeEncumbranceItemFilter(actor),
-    currencyLbs: containerCurrencyLbs,
-    actorCurrencyLbs: actorCurrencyLbs(actor),
-    onCycle: containerId => LOG.warn("Cycle detected", { containerId })
-  });
-}
-
-// Matches computeActorCarriedLbs above, so no includeNested here either.
-function getCarriedShare(actor, item) {
-  return getCarriedShareCore(actor, item, { validateItem: makeEncumbranceItemFilter(actor) });
-}
-
-function validateContainerRestrictions(containerItem, itemData) {
-  return validateContainerRestrictionsCore(containerItem, itemData, {
-    weaponTypeMap: getWeaponTypeMap()
-  });
-}
+const wcSocket = new WCSocket();
 
 function notifyExceedRemote(data) {
   const message = renderRejection(data);
@@ -98,29 +20,18 @@ function notifyExceedRemote(data) {
   ui.notifications?.warn(message);
 }
 
-registerModuleSettings(LOG);
-registerUnitConversion(LOG);
+registerModuleSettings();
 // The reduction rides on dnd5e's own contentsWeight, so the capacity bar,
 // the inventory rows and the encumbrance track all pick it up from one patch.
-registerContainerPatch(LOG);
+registerContainerPatch();
 
 Hooks.once("ready", () => {
   wcSocket.register("notifyExceedRemote", notifyExceedRemote);
   wcSocket.init();
 
-  registerEnforcementHooks({ logger: LOG, socket: wcSocket });
+  registerEnforcementHooks({ socket: wcSocket });
   registerSheetUiHooks();
-  installPublicApi({
-    computeActorCarriedLbs,
-    computeAdjustedLoad,
-    getCarriedShare,
-    getCapacityLbs,
-    getSystemWeightUnit,
-    lbsToDisplay,
-    validateContainerRestrictions,
-    openRulesDialog: openReductionDialog,
-    debugApi: buildDebugApi({ computeAdjustedLoad, getCapacityLbs, lbsToDisplay })
-  });
+  installPublicApi();
 
   LOG.info("ready", {
     system: game.system?.id,

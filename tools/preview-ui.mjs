@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
+import { launchChromium } from "./launch-browser.mjs";
 const require = createRequire(import.meta.url);
 const [foundry, packages] = process.argv.slice(2);
 if (!foundry || !packages) throw new Error("Pass Foundry resources/app and runtime node_modules paths.");
@@ -17,8 +18,8 @@ const localize = key => translations[key] ?? key;
 globalThis.game = { i18n: { localize } };
 globalThis.foundry = { utils: {} };
 Handlebars.registerHelper("localize", localize);
-const { renderRuleMultiselect } = await import("../scripts/ui/rule-presentation.js");
-const { listRulePresets } = await import("../scripts/ui/rule-presets.js");
+const { renderRuleMultiselect } = await import("../scripts/ui/container-rules-multiselect.js");
+const { listRulePresets } = await import("../scripts/core/rules.js");
 const select = name => renderRuleMultiselect({ name, selectedValues: [], placeholder: "Без ограничений", groups: [{ key: "items", label: "Предметы", options: [{ value: "weapon", label: "Оружие" }, { value: "equipment", label: "Снаряжение" }] }] });
 const context = {
   containerName: "Походная сумка следопыта", reductionPct: 50,
@@ -56,7 +57,7 @@ document.querySelectorAll('[data-action=selectTab]').forEach(button=>button.oncl
 </script></html>`;
 const file = path.join(output, "index.html");
 await fs.writeFile(file, html);
-const browser = await chromium.launch({ headless: true, channel: "msedge" });
+const browser = await launchChromium(chromium);
 const page = await browser.newPage({ viewport: { width: 1080, height: 880 } });
 await page.goto(pathToFileURL(file).href);
 await page.waitForTimeout(1200);

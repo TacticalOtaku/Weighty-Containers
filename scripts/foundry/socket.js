@@ -1,4 +1,5 @@
 import { MODULE_ID } from "../constants.js";
+import { LOG } from "./logger.js";
 
 /**
  * Thin facade over socketlib with a native-socket fallback.
@@ -7,8 +8,7 @@ import { MODULE_ID } from "../constants.js";
  * to ask a GM client to write documents on someone else's behalf.
  */
 export class WCSocket {
-  constructor(logger) {
-    this.logger = logger;
+  constructor() {
     this.socket = null;
     this.handlers = new Map();
     this.ready = false;
@@ -16,7 +16,7 @@ export class WCSocket {
 
   init() {
     if (typeof socketlib === "undefined") {
-      this.logger.info("socketlib not found - native Foundry socket fallback");
+      LOG.info("socketlib not found - native Foundry socket fallback");
       this._initNativeFallback();
       return;
     }
@@ -26,9 +26,9 @@ export class WCSocket {
         this.socket.register(name, handler);
       }
       this.ready = true;
-      this.logger.info("socketlib registered");
+      LOG.info("socketlib registered");
     } catch (error) {
-      this.logger.error("socketlib registration failed", error);
+      LOG.error("socketlib registration failed", error);
       this._initNativeFallback();
     }
   }

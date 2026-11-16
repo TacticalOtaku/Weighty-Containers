@@ -6,6 +6,7 @@ import path from 'node:path';
 import http from 'node:http';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { launchChromium } from './launch-browser.mjs';
 const require = createRequire(import.meta.url);
 const [foundry, packages] = process.argv.slice(2);
 if (!foundry || !packages) throw new Error('Pass Foundry resources/app and runtime node_modules paths.');
@@ -22,7 +23,7 @@ const server = http.createServer(async (req, res) => {
   } catch { res.writeHead(404).end(); }
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-const browser = await chromium.launch({ channel: 'msedge', headless: true });
+const browser = await launchChromium(chromium);
 try {
   const page = await browser.newPage({ viewport: { width: 1100, height: 900 } });
   page.on('pageerror', error => console.error(error));
@@ -34,9 +35,11 @@ try {
   await page.evaluate(async () => {
     globalThis.foundry = { utils: {} };
     globalThis.game = { i18n: { localize: key => key.split('.').at(-1), format: (key, args) => JSON.stringify(args) } };
-    const { renderRuleMultiselect } = await import('/scripts/ui/rule-presentation.js');
+    const {
+      ContainerRulesMultiselectController,
+      renderRuleMultiselect
+    } = await import('/scripts/ui/container-rules-multiselect.js');
     const { ContainerRulesState, RULE_SELECTION_NAMES } = await import('/scripts/ui/container-rules-state.js');
-    const { ContainerRulesMultiselectController } = await import('/scripts/ui/container-rules-multiselect.js');
     const options = Array.from({ length: 45 }, (_, i) => ({ value: i === 30 ? 'shield' : `option${i}`, label: i === 30 ? 'Shield' : `Option ${String(i).padStart(2, '0')}` }));
     const groups = [{ key: 'equipment', label: 'Equipment', options }];
     const catalogs = Object.fromEntries(RULE_SELECTION_NAMES.map(name => [name, groups]));

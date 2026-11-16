@@ -1,43 +1,25 @@
 import { I18N } from "../constants.js";
-import { getContainerRestrictions, normalizeToken, parseTokenList } from "../core/restrictions.js";
-import { clamp, getReductionPct, num } from "../core/weight.js";
 import {
-  getRuleItemTypeGroups,
-  getRulePropertyGroups,
-  getRuleSubtypeGroups
-} from "./rule-presentation.js";
+  RULE_SELECTION_NAMES,
+  getContainerRuleConfig,
+  normalizeReductionPct,
+  normalizeToken,
+  parseTokenList
+} from "../core/rules.js";
+import { getRuleCatalogs } from "../integrations/dnd5e.js";
 
-export const RULE_SELECTION_NAMES = [
-  "allowedTypes",
-  "allowedSubtypes",
-  "requiredProperties",
-  "forbiddenProperties"
-];
+export { RULE_SELECTION_NAMES };
 
 export class ContainerRulesState {
   static fromItem(containerItem) {
-    const restrictions = getContainerRestrictions(containerItem);
-    const propertyGroups = getRulePropertyGroups();
     return new ContainerRulesState({
-      draft: {
-        reductionPct: getReductionPct(containerItem),
-        allowedTypes: restrictions.allowedTypes,
-        allowedSubtypes: restrictions.allowedSubtypes,
-        requiredProperties: restrictions.requiredProperties,
-        forbiddenProperties: restrictions.forbiddenProperties,
-        propertyMatchMode: restrictions.propertyMatchMode
-      },
-      catalogs: {
-        allowedTypes: getRuleItemTypeGroups(),
-        allowedSubtypes: getRuleSubtypeGroups(),
-        requiredProperties: propertyGroups,
-        forbiddenProperties: propertyGroups
-      }
+      draft: getContainerRuleConfig(containerItem),
+      catalogs: getRuleCatalogs()
     });
   }
 
   constructor({ draft, catalogs }) {
-    this.reductionPct = clamp(Math.round(num(draft.reductionPct, 0)), 0, 100);
+    this.reductionPct = normalizeReductionPct(draft.reductionPct);
     this.allowedTypes = parseTokenList(draft.allowedTypes);
     this.allowedSubtypes = parseTokenList(draft.allowedSubtypes);
     this.requiredProperties = parseTokenList(draft.requiredProperties);
@@ -47,7 +29,7 @@ export class ContainerRulesState {
   }
 
   setReductionPct(value) {
-    this.reductionPct = clamp(Math.round(num(value, 0)), 0, 100);
+    this.reductionPct = normalizeReductionPct(value);
     return this.reductionPct;
   }
 
@@ -73,24 +55,28 @@ export class ContainerRulesState {
     );
   }
 
-  selectionLabels(name) {
+  labelsFor(name, tokens) {
     const labelMap = new Map();
     for (const group of this.catalogs[name] ?? []) {
       for (const option of group.options) {
         labelMap.set(normalizeToken(option.value), option.label);
       }
     }
-    return this.getSelection(name).map(value => ({
+    return parseTokenList(tokens).map(value => ({
       value,
       label: labelMap.get(value) ?? value
     }));
+  }
+
+  selectionLabels(name) {
+    return this.labelsFor(name, this.getSelection(name));
   }
 
   unavailableSubtypeValues() {
     if (!this.allowedTypes.length) return [];
     const selectedTypes = new Set(this.allowedTypes);
     const available = new Set();
-    for (const group of this.catalogs.allowedSubtypes) {
+    for (const group of this.catalogs.allowedSubtypes ?? []) {
       const types = new Set((group.types ?? []).map(normalizeToken));
       if (types.size && !Array.from(types).some(type => selectedTypes.has(type))) continue;
       for (const option of group.options) available.add(normalizeToken(option.value));
@@ -144,29 +130,35 @@ export class ContainerRulesState {
     return Math.max(0, baseWeight * (1 - this.reductionPct / 100));
   }
 
-  summaryLines() {
+  summaryLines(i18n = globalThis.game?.i18n) {
     const typeLabels = this.selectionLabels("allowedTypes").map(entry => entry.label);
     const subtypeLabels = this.selectionLabels("allowedSubtypes").map(entry => entry.label);
     const requiredLabels = this.selectionLabels("requiredProperties").map(entry => entry.label);
     const forbiddenLabels = this.selectionLabels("forbiddenProperties").map(entry => entry.label);
-    const lines = [game.i18n.format(`${I18N}.configDialog.summary.reduction`, {
+    const lines = [i18n.format(`${I18N}.configDialog.summary.reduction`, {
       pct: this.reductionPct
     })];
     lines.push(typeLabels.length
-      ? game.i18n.format(`${I18N}.configDialog.summary.types`, { values: typeLabels.join(", ") })
-      : game.i18n.localize(`${I18N}.configDialog.summary.anyTypes`));
-    if (subtypeLabels.length) lines.push(game.i18n.format(`${I18N}.configDialog.summary.subtypes`, {
-      values: subtypeLabels.join(", ")
-    }));
-    if (requiredLabels.length) lines.push(game.i18n.format(
-      `${I18N}.configDialog.summary.${this.propertyMatchMode === "any" ? "requiredAny" : "requiredAll"}`,
-      { values: requiredLabels.join(", ") }
-    ));
-    if (forbiddenLabels.length) lines.push(game.i18n.format(`${I18N}.configDialog.summary.forbidden`, {
-      values: forbiddenLabels.join(", ")
-    }));
+      ? i18n.format(`${I18N}.configDialog.summary.types`, { values: typeLabels.join(", ") })
+      : i18n.localize(`${I18N}.configDialog.summary.anyTypes`));
+    if (subtypeLabels.length) {
+      lines.push(i18n.format(`${I18N}.configDialog.summary.subtypes`, {
+        values: subtypeLabels.join(", ")
+      }));
+    }
+    if (requiredLabels.length) {
+      lines.push(i18n.format(
+        `${I18N}.configDialog.summary.${this.propertyMatchMode === "any" ? "requiredAny" : "requiredAll"}`,
+        { values: requiredLabels.join(", ") }
+      ));
+    }
+    if (forbiddenLabels.length) {
+      lines.push(i18n.format(`${I18N}.configDialog.summary.forbidden`, {
+        values: forbiddenLabels.join(", ")
+      }));
+    }
     if (!requiredLabels.length && !forbiddenLabels.length) {
-      lines.push(game.i18n.localize(`${I18N}.configDialog.summary.noProperties`));
+      lines.push(i18n.localize(`${I18N}.configDialog.summary.noProperties`));
     }
     return lines;
   }

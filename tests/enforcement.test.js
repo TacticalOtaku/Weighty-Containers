@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { ItemCollectionView } from "../scripts/core/containers.js";
 import { registerEnforcementHooks, renderRejection } from "../scripts/foundry/enforcement.js";
+import { LOG } from "../scripts/foundry/logger.js";
 
 const item = ({
   id,
@@ -52,11 +53,13 @@ const expandObject = source => {
   return expanded;
 };
 
-const merge = (left, right) => {
+const merge = (left, right, { applyOperators = false } = {}) => {
   const result = structuredClone(left);
   const apply = (target, source) => {
     for (const [key, value] of Object.entries(source)) {
-      if (value && typeof value === "object" && !Array.isArray(value)) {
+      if (applyOperators && key.startsWith("-=")) {
+        delete target[key.slice(2)];
+      } else if (value && typeof value === "object" && !Array.isArray(value)) {
         target[key] ??= {};
         apply(target[key], value);
       } else {
@@ -69,6 +72,7 @@ const merge = (left, right) => {
 };
 
 const setup = (items, { modules = [], enforceMode = "block" } = {}) => {
+  LOG.setLevel("off");
   const hooks = {};
   const socketCalls = [];
   globalThis.Hooks = {
@@ -109,10 +113,6 @@ const setup = (items, { modules = [], enforceMode = "block" } = {}) => {
   for (const entry of actor.items) entry.parent = actor;
 
   registerEnforcementHooks({
-    logger: {
-      info() {},
-      warn() {}
-    },
     socket: {
       executeForUsers(name, users, ...args) { socketCalls.push([name, ...args, users]); }
     }
@@ -136,6 +136,19 @@ test("preUpdateItem blocks a flattened weight-unit change that exceeds capacity"
   );
   assert.equal(socketCalls.length, 1);
   assert.equal(socketCalls[0][1].containerName, "bag");
+});
+
+test("preUpdateItem treats -= flag deletions as relevant changes", () => {
+  const bag = item({ id: "bag", type: "container", capacity: 5 });
+  bag.flags = { "weighty-containers": { reductionPct: 50 } };
+  const payload = item({ id: "payload", container: "bag", weight: 8 });
+  const { hooks, socketCalls } = setup([bag, payload]);
+
+  assert.equal(
+    hooks.preUpdateItem(bag, { "flags.weighty-containers.-=reductionPct": null }, {}),
+    false
+  );
+  assert.equal(socketCalls.length, 1);
 });
 
 test("preCreateItem blocks an overflowing ancestor container", () => {
@@ -165,8 +178,6 @@ test("edits to an item already inside a rule-breaking container are not blocked"
   const sword = item({ id: "sword", type: "weapon", container: "bag", weight: 6 });
   const { hooks, socketCalls } = setup([bag, sword]);
 
-  // The sword does not satisfy the bag's rules, but it is already inside:
-  // equipping or renaming it must still go through, silently.
   assert.equal(hooks.preUpdateItem(sword, { "system.equipped": true }, {}), undefined);
   assert.equal(hooks.preUpdateItem(sword, { name: "Renamed" }, {}), undefined);
   assert.equal(socketCalls.length, 0);
@@ -234,8 +245,6 @@ test("a forged or malformed socket payload is not shown", () => {
   }), "WC.restrictionMessage.default");
 });
 
-// Item Piles removes items from the source before it creates them on the
-// target, so its operations must be refused in its pre-hooks, never half-way.
 const pileData = ({ id, container = null, weight = 0, type = "loot", capacity = null, quantity = 1 }) => ({
   _id: id,
   name: id,

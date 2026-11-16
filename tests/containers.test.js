@@ -6,9 +6,12 @@ import {
   collectContainerAncestorIds,
   computeActorCarriedLbs,
   computeAdjustedLoad,
+  computeContainerLoadFromContents,
   createProjectedActor,
+  evaluateContainerChanges,
   findCapacityViolations,
-  getCarriedShare
+  getCarriedShare,
+  isRelevantExpandedChange
 } from "../scripts/core/containers.js";
 
 const item = ({
@@ -55,6 +58,22 @@ test("reductions compound through nested containers", () => {
   // nested contents 4 * 0.75 = 3; top contents (2 + 3 + 8) * 0.5 = 6.5
   assert.equal(computeAdjustedLoad(subject, "top").load, 6.5);
   assert.equal(computeActorCarriedLbs(subject), 7.5);
+});
+
+test("computeContainerLoadFromContents shares load math for standalone containers", () => {
+  const bag = item({ id: "bag", type: "container", weight: 1, reduction: 50 });
+  const sub = item({ id: "sub", type: "container", weight: 2, reduction: 25 });
+  const inner = item({ id: "inner", weight: 4 });
+  sub.system.contents = [inner];
+  const direct = item({ id: "direct", weight: 4, quantity: 2 });
+
+  const nestedResult = computeContainerLoadFromContents(bag, [sub, direct], { includeNested: true });
+  assert.equal(nestedResult.rawLbs, 13);
+  assert.equal(nestedResult.load, 6.5);
+
+  const directResult = computeContainerLoadFromContents(bag, [sub, direct], { includeNested: false });
+  assert.equal(directResult.rawLbs, 10);
+  assert.equal(directResult.load, 5);
 });
 
 test("collectContainerAncestorIds returns nearest-to-root order", () => {
@@ -156,6 +175,38 @@ test("an unchanged over-full container does not block unrelated edits", () => {
   const projected = createProjectedActor(current, item({ id: "payload", container: "bag", weight: 8 }));
 
   assert.deepEqual(findCapacityViolations(current, projected), []);
+});
+
+test("evaluateContainerChanges ranks nearest-to-root violations and checks entry transitions", () => {
+  const outer = item({ id: "outer", type: "container", capacity: 10 });
+  const inner = item({ id: "inner", type: "container", container: "outer", capacity: 5 });
+  inner.flags["weighty-containers"].allowedTypes = ["consumable"];
+  const sword = item({ id: "sword", type: "weapon", weight: 12 });
+  const current = actor([outer, inner, sword]);
+
+  const blocked = evaluateContainerChanges(
+    current,
+    [item({ id: "sword", type: "weapon", container: "inner", weight: 12 })],
+    { stopOnRestriction: true }
+  );
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.restrictionFailures.length, 1);
+  assert.equal(blocked.capacityViolation, null);
+
+  const warned = evaluateContainerChanges(
+    current,
+    [item({ id: "sword", type: "weapon", container: "inner", weight: 12 })]
+  );
+  assert.equal(warned.ok, false);
+  assert.equal(warned.restrictionFailures.length, 1);
+  assert.equal(warned.capacityViolation.container.id, "inner");
+});
+
+test("isRelevantExpandedChange ignores unrelated edits and recognizes Foundry deletions", () => {
+  assert.equal(isRelevantExpandedChange({ name: "Bag", system: { equipped: true } }), false);
+  assert.equal(isRelevantExpandedChange({ system: { weight: { value: 2 } } }), true);
+  assert.equal(isRelevantExpandedChange({ system: { "-=container": null } }), true);
+  assert.equal(isRelevantExpandedChange({ flags: { "-=weighty-containers": null } }), true);
 });
 
 // Each case: the share times the item's weight must be exactly what the item

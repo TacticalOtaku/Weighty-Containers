@@ -1,4 +1,11 @@
-import { convertWeightToLbs, lbsToUnit, setUnitConversionTable } from "../core/units.js";
+import { I18N } from "../constants.js";
+import { normalizeToken, parseTokenList } from "../core/rules.js";
+import {
+  DEFAULT_UNIT_CONVERSION,
+  convertWeightToLbs,
+  lbsToUnit,
+  normalizeUnitConversionTable
+} from "../core/weight.js";
 
 export const CONTAINER_DATA_MODEL_PATH = "CONFIG.Item.dataModels.container";
 
@@ -25,9 +32,13 @@ const PROPERTY_CATALOGS = [
  * dnd5e registers (class, spell, feat, facility, ...) is noise in the rules
  * dialog.
  */
-const PHYSICAL_ITEM_TYPES = new Set([
-  "weapon", "equipment", "consumable", "tool", "loot", "container"
-]);
+const PHYSICAL_ITEM_TYPES = [
+  "weapon", "consumable", "equipment", "tool", "loot", "container"
+];
+const PHYSICAL_ITEM_TYPE_SET = new Set(PHYSICAL_ITEM_TYPES);
+
+let cachedRawUnitTable = null;
+let cachedNormalizedUnitTable = DEFAULT_UNIT_CONVERSION;
 
 function getConfig() {
   return globalThis.CONFIG ?? {};
@@ -45,17 +56,31 @@ function getSetting(namespace, key, fallback = undefined) {
   }
 }
 
+function localizeLabel(label, fallback = "") {
+  if (!label) return fallback;
+  try {
+    return globalThis.game?.i18n?.localize?.(String(label)) ?? String(label);
+  } catch {
+    return String(label);
+  }
+}
+
+function currentLang() {
+  return globalThis.game?.i18n?.lang;
+}
+
 /**
- * Adopt dnd5e's weight conversion table. The system's kilogram is 2.5 lb, so
- * anything the module computes with a physical factor drifts from the sheet.
- * Safe to call before CONFIG.DND5E exists; the offline fallback stays in place.
- * @returns {boolean} whether the system table was found
+ * dnd5e's weight conversion table (`CONFIG.DND5E.weightUnits`, where a
+ * kilogram is 2.5 lb), falling back to {@link DEFAULT_UNIT_CONVERSION}.
  */
-export function installUnitConversion() {
+export function getUnitConversionTable() {
   const table = getDnd5eConfig().weightUnits;
-  if (!table || typeof table !== "object") return false;
-  setUnitConversionTable(table);
-  return true;
+  if (!table || typeof table !== "object") return DEFAULT_UNIT_CONVERSION;
+  if (table !== cachedRawUnitTable) {
+    cachedRawUnitTable = table;
+    cachedNormalizedUnitTable = normalizeUnitConversionTable(table);
+  }
+  return cachedNormalizedUnitTable;
 }
 
 /** The unit dnd5e is configured to display weights in. */
@@ -64,7 +89,7 @@ export function getSystemWeightUnit() {
 }
 
 export function lbsToDisplay(lbs) {
-  return lbsToUnit(lbs, getSystemWeightUnit());
+  return lbsToUnit(lbs, getSystemWeightUnit(), getUnitConversionTable());
 }
 
 /** Whether dnd5e is counting coin weight at all. */
@@ -79,9 +104,6 @@ export function isCurrencyWeightEnabled() {
  * because dnd5e divides the coin count by that unit's coins-per-weight. The
  * Item Piles D&D 5e bridge keeps coins in the same `system.currency` fields,
  * so coins it moves weigh the same.
- *
- * @param {Object} currency  `{ pp, gp, ep, sp, cp }`
- * @returns {number}
  */
 export function currencyWeightOf(currency) {
   if (!currency || !isCurrencyWeightEnabled()) return 0;
@@ -98,45 +120,40 @@ export function currencyWeightOf(currency) {
 }
 
 /**
- * Weight of the coins inside a container, in pounds. Prefers the system's own
- * getter. dnd5e adds that number to the contents without converting, so it
- * counts in the container's own weight units, and is read in them here.
+ * Weight of the coins inside a container, in pounds. Prefers dnd5e's own
+ * `currencyWeight` getter (which is in the container's `weight.units`); when
+ * absent on plain-object projections, falls back to `currencyWeightOf` (which
+ * is in the display unit) and converts from that unit.
  */
 export function containerCurrencyLbs(containerItem) {
+  const unitTable = getUnitConversionTable();
+  const displayUnit = getSystemWeightUnit();
   const own = containerItem?.system?.currencyWeight;
-  const weight = typeof own === "number" && Number.isFinite(own)
-    ? own
-    : currencyWeightOf(containerItem?.system?.currency);
-  return convertWeightToLbs(weight, containerItem?.system?.weight?.units, getSystemWeightUnit());
+  if (typeof own === "number" && Number.isFinite(own)) {
+    return convertWeightToLbs(
+      own,
+      containerItem?.system?.weight?.units,
+      displayUnit,
+      unitTable
+    );
+  }
+  return convertWeightToLbs(
+    currencyWeightOf(containerItem?.system?.currency),
+    displayUnit,
+    displayUnit,
+    unitTable
+  );
 }
 
 /** Weight of the coins an actor carries directly, in pounds. */
 export function actorCurrencyLbs(actor) {
-  return convertWeightToLbs(currencyWeightOf(actor?.system?.currency), getSystemWeightUnit());
-}
-
-/**
- * Contents weight of a container *before* this module's reduction, in the
- * container's own weight units - dnd5e's formula, minus the patched getter.
- *
- * Used by the rules dialog so the preview can show what the container really
- * holds instead of an abstract sample weight. Returns null when the contents
- * cannot be read synchronously (compendium items).
- *
- * @param {Object} containerItem
- * @returns {number|null}
- */
-export function getRawContentsWeight(containerItem) {
-  const contents = containerItem?.system?.contents;
-  if (!contents || typeof contents[Symbol.iterator] !== "function") return null;
-  const units = containerItem.system?.weight?.units;
-  let total = Number(containerItem.system?.currencyWeight) || 0;
-  for (const child of contents) {
-    const childWeight = child?.system?.totalWeightIn?.(units);
-    if (typeof childWeight !== "number") return null;
-    total += childWeight;
-  }
-  return total;
+  const displayUnit = getSystemWeightUnit();
+  return convertWeightToLbs(
+    currencyWeightOf(actor?.system?.currency),
+    displayUnit,
+    displayUnit,
+    getUnitConversionTable()
+  );
 }
 
 /** Short label for a weight unit, e.g. "lb" or "kg", localized when possible. */
@@ -144,11 +161,7 @@ export function getWeightUnitLabel(unit) {
   const key = unit || getSystemWeightUnit();
   const abbreviation = getDnd5eConfig().weightUnits?.[key]?.abbreviation;
   if (!abbreviation) return key;
-  try {
-    return globalThis.game?.i18n?.localize?.(abbreviation) ?? abbreviation;
-  } catch {
-    return abbreviation;
-  }
+  return localizeLabel(abbreviation, key);
 }
 
 /**
@@ -168,37 +181,213 @@ export function getContainerDataModelClass() {
   return getConfig().Item?.dataModels?.container ?? null;
 }
 
-export function getItemDocumentTypes() {
-  return globalThis.game?.system?.documentTypes?.Item ?? [];
+function addOption(map, value, label = null) {
+  const key = normalizeToken(value);
+  if (!key || map.has(key)) return;
+  map.set(key, localizeLabel(label, String(value)));
 }
 
-export function getItemTypeLabels() {
-  return getConfig().Item?.typeLabels ?? {};
+function optionsFromConfig(config) {
+  const options = new Map();
+  if (!config) return [];
+
+  if (config instanceof Map) {
+    for (const [value, label] of config.entries()) addOption(options, value, label);
+  } else if (Array.isArray(config) || config instanceof Set) {
+    for (const value of config) addOption(options, value);
+  } else if (typeof config === "object") {
+    for (const [value, label] of Object.entries(config)) {
+      if (label && typeof label === "object" && !Array.isArray(label)) {
+        addOption(options, value, label.label ?? label.name ?? value);
+      } else {
+        addOption(options, value, label);
+      }
+    }
+  }
+
+  const lang = currentLang();
+  return Array.from(options, ([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label, lang));
 }
 
-export function isPhysicalItemType(type) {
-  return PHYSICAL_ITEM_TYPES.has(String(type ?? "").toLowerCase());
+function valuesFromConfig(config) {
+  if (!config) return [];
+  if (config instanceof Map) return Array.from(config.keys());
+  if (Array.isArray(config) || config instanceof Set) return Array.from(config);
+  if (typeof config !== "object") return [config];
+
+  const values = [];
+  for (const [key, value] of Object.entries(config)) {
+    if (value === false || value == null) continue;
+    if (value === true || typeof value !== "object") {
+      values.push(key);
+      continue;
+    }
+
+    const nested = valuesFromConfig(value);
+    if (nested.length) values.push(...nested);
+    else values.push(key);
+  }
+  return values;
 }
 
-export function getSubtypeCatalogs() {
-  const config = getDnd5eConfig();
-  return SUBTYPE_CATALOGS.map(catalog => ({
+/**
+ * Options of a catalog that are not already offered by an earlier group.
+ * dnd5e's catalogs overlap (equipment types contain every armor type), and
+ * the same checkbox twice in one list only reads as a bug.
+ */
+function takeUnseen(options, seen) {
+  return options.filter(option => {
+    if (seen.has(option.value)) return false;
+    seen.add(option.value);
+    return true;
+  });
+}
+
+function buildItemTypeGroups() {
+  const itemTypes = new Map();
+  const docTypes = globalThis.game?.system?.documentTypes?.Item ?? [];
+  const typeLabels = getConfig().Item?.typeLabels ?? {};
+
+  for (const type of valuesFromConfig(docTypes)) {
+    if (PHYSICAL_ITEM_TYPE_SET.has(normalizeToken(type))) {
+      addOption(itemTypes, type, `TYPES.Item.${type}`);
+    }
+  }
+  for (const [type, label] of Object.entries(typeLabels)) {
+    if (PHYSICAL_ITEM_TYPE_SET.has(normalizeToken(type))) {
+      addOption(itemTypes, type, label);
+    }
+  }
+  for (const type of PHYSICAL_ITEM_TYPES) {
+    addOption(itemTypes, type, `TYPES.Item.${type}`);
+  }
+
+  const lang = currentLang();
+  const options = Array.from(itemTypes, ([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label, lang));
+
+  return [{ label: localizeLabel(`${I18N}.configDialog.groups.itemTypes`), options }];
+}
+
+function nestedSubtypeGroups(catalog, seen) {
+  const groups = [];
+  if (!catalog.values || typeof catalog.values !== "object") return groups;
+  for (const [parent, entry] of Object.entries(catalog.values)) {
+    const subtypes = entry && typeof entry === "object" ? entry.subtypes : null;
+    const options = takeUnseen(optionsFromConfig(subtypes), seen);
+    if (!options.length) continue;
+    groups.push({
+      key: `${catalog.key}-${parent}`,
+      label: localizeLabel(entry.label, parent),
+      options,
+      types: catalog.types ?? []
+    });
+  }
+  return groups;
+}
+
+function buildSubtypeGroups(dnd5eConfig) {
+  const seen = new Set(["melee", "ranged"]);
+  const groups = [{
+    key: "weaponRange",
+    label: localizeLabel(`${I18N}.configDialog.groups.weaponRange`),
+    types: ["weapon"],
+    options: [
+      { value: "melee", label: localizeLabel(`${I18N}.configDialog.option.melee`) },
+      { value: "ranged", label: localizeLabel(`${I18N}.configDialog.option.ranged`) }
+    ]
+  }];
+
+  const catalogs = SUBTYPE_CATALOGS.map(catalog => ({
     ...catalog,
-    values: config[catalog.key]
+    values: dnd5eConfig[catalog.key]
   }));
+  for (const catalog of catalogs) {
+    const options = takeUnseen(optionsFromConfig(catalog.values), seen);
+    if (options.length) {
+      groups.push({
+        key: catalog.key,
+        label: localizeLabel(`${I18N}.configDialog.groups.${catalog.labelKey}`),
+        options,
+        types: catalog.types ?? []
+      });
+    }
+  }
+  for (const catalog of catalogs) {
+    groups.push(...nestedSubtypeGroups(catalog, seen));
+  }
+
+  return groups;
 }
 
-export function getPropertyCatalogs() {
-  const config = getDnd5eConfig();
-  return PROPERTY_CATALOGS.map(catalog => ({
-    ...catalog,
-    values: config[catalog.key]
-  }));
+function buildPropertyGroups(dnd5eConfig) {
+  const groups = [];
+  const seen = new Set();
+
+  for (const catalog of PROPERTY_CATALOGS) {
+    const options = takeUnseen(optionsFromConfig(dnd5eConfig[catalog.key]), seen);
+    if (options.length) {
+      groups.push({
+        key: catalog.key,
+        label: localizeLabel(`${I18N}.configDialog.groups.${catalog.labelKey}`),
+        options
+      });
+    }
+  }
+
+  const validProperties = dnd5eConfig.validProperties;
+  if (validProperties && typeof validProperties === "object") {
+    for (const [itemType, properties] of Object.entries(validProperties)) {
+      const options = takeUnseen(optionsFromConfig(properties), seen);
+      if (options.length) {
+        groups.push({
+          key: `validProperties-${itemType}`,
+          label: localizeLabel(`TYPES.Item.${itemType}`, itemType),
+          options
+        });
+      }
+    }
+  }
+
+  return groups;
 }
 
-export function getValidPropertiesByItemType() {
-  const validProperties = getDnd5eConfig().validProperties;
-  return validProperties && typeof validProperties === "object"
-    ? validProperties
-    : {};
+/**
+ * Rule selection catalogs derived from dnd5e configuration tables.
+ */
+export function getRuleCatalogs() {
+  const dnd5eConfig = getDnd5eConfig();
+  const propertyGroups = buildPropertyGroups(dnd5eConfig);
+  return {
+    allowedTypes: buildItemTypeGroups(),
+    allowedSubtypes: buildSubtypeGroups(dnd5eConfig),
+    requiredProperties: propertyGroups,
+    forbiddenProperties: propertyGroups
+  };
+}
+
+/**
+ * Human labels for stored rule tokens, e.g. `mgc` -> "Magical".
+ * Unknown tokens, or a Foundry that is not ready yet, fall back to the token.
+ */
+export function getRuleTokenLabels(name, tokens, cache = new Map()) {
+  if (!cache.has(name)) {
+    const labels = new Map();
+    try {
+      const catalogs = cache.get("__catalogs") ?? getRuleCatalogs();
+      cache.set("__catalogs", catalogs);
+      for (const group of catalogs[name] ?? []) {
+        for (const option of group.options) {
+          const key = normalizeToken(option.value);
+          if (!labels.has(key)) labels.set(key, option.label);
+        }
+      }
+    } catch {
+      labels.clear();
+    }
+    cache.set(name, labels);
+  }
+  const labels = cache.get(name);
+  return parseTokenList(tokens).map(value => labels.get(value) || value);
 }

@@ -1,16 +1,9 @@
 import { I18N, MODULE_ID } from "../constants.js";
+import { isRelevantExpandedChange } from "../core/containers.js";
+import { RULE_SELECTION_NAMES } from "../core/rules.js";
 import {
-  collectContainerAncestorIds,
-  createProjectedActor,
-  findCapacityViolations,
-  getItem
-} from "../core/containers.js";
-import { validateContainerRestrictions } from "../core/restrictions.js";
-import { isContainer } from "../core/weight.js";
-import {
-  containerCurrencyLbs,
+  getRuleTokenLabels,
   getSystemWeightUnit,
-  getWeaponTypeMap,
   getWeightUnitLabel,
   lbsToDisplay
 } from "../integrations/dnd5e.js";
@@ -19,8 +12,9 @@ import {
   isModuleActive,
   registerItemPilesGuards
 } from "../integrations/item-piles.js";
-import { RULE_SELECTION_NAMES } from "../ui/container-rules-state.js";
-import { ruleTokenLabels } from "../ui/rule-presentation.js";
+import { evaluateContainerChange } from "./containers.js";
+import { LOG } from "./logger.js";
+import { getModuleSetting } from "./runtime.js";
 
 const MAX_SOCKET_TEXT = 1000;
 
@@ -41,38 +35,9 @@ function makeItemCandidate(item, changes = {}) {
   return candidate;
 }
 
-/**
- * Change paths that can move weight or break a content rule. An update that
- * touches none of them (charges, equipped, description...) cannot create a
- * violation, so it skips the whole projection.
- */
-const RELEVANT_CHANGE_PATHS = [
-  ["type"],
-  ["system", "container"],
-  ["system", "quantity"],
-  ["system", "weight"],
-  ["system", "capacity"],
-  ["system", "currency"],
-  ["system", "properties"],
-  ["system", "type"],
-  ["flags", MODULE_ID]
-];
-
-function touchesPath(changes, path) {
-  let node = changes;
-  for (const key of path) {
-    if (!node || typeof node !== "object") return false;
-    // Foundry's deletion syntax (`-=key`) removes the value outright.
-    if (Object.hasOwn(node, `-=${key}`)) return true;
-    if (!Object.hasOwn(node, key)) return false;
-    node = node[key];
-  }
-  return true;
-}
-
 export function isRelevantItemChange(changes) {
   const expanded = foundry.utils.expandObject(changes ?? {});
-  return RELEVANT_CHANGE_PATHS.some(path => touchesPath(expanded, path));
+  return isRelevantExpandedChange(expanded);
 }
 
 function localizeFallback(key, fallback) {
@@ -83,7 +48,7 @@ function localizeFallback(key, fallback) {
 function makeRestrictionMessage({ containerName, itemName, restrictions }) {
   const details = [];
   const labelCache = new Map();
-  const list = name => ruleTokenLabels(name, restrictions[name], labelCache).join(", ");
+  const list = name => getRuleTokenLabels(name, restrictions[name], labelCache).join(", ");
   if (restrictions.allowedTypes.length) {
     details.push(game.i18n.format(`${I18N}.restrictionMessage.types`, {
       types: list("allowedTypes")
@@ -111,14 +76,6 @@ function makeRestrictionMessage({ containerName, itemName, restrictions }) {
     itemName: itemName ?? localizeFallback(`${I18N}.fallback.item`, "Item"),
     rules: details.join("; ")
   });
-}
-
-function getCustomExceedText() {
-  try {
-    return String(game.settings.get(MODULE_ID, "exceedMessageText") ?? "").trim();
-  } catch {
-    return "";
-  }
 }
 
 /** `{name}` placeholders in the GM's custom text, left alone when unknown. */
@@ -155,7 +112,7 @@ export function makeCapacityMessage(violation) {
     };
   }
 
-  const custom = getCustomExceedText();
+  const custom = String(getModuleSetting("exceedMessageText") ?? "").trim();
   if (custom) return fillPlaceholders(custom, values);
   return game.i18n.format(key, values);
 }
@@ -216,14 +173,6 @@ export function resolveNotificationTargets(scope, {
   return Array.from(new Set([...self, ...gms, ...owners]));
 }
 
-function getNotifyScope() {
-  try {
-    return game.settings.get(MODULE_ID, "notifyScope") ?? "selfAndGm";
-  } catch {
-    return "selfAndGm";
-  }
-}
-
 /**
  * Escape hatch for other modules and macros: `{ [MODULE_ID]: { bypass: true } }`.
  * A fresh object each call, since Foundry passes operation options around.
@@ -236,33 +185,18 @@ function isBypassed(options) {
   return options?.[MODULE_ID]?.bypass === true;
 }
 
-export function registerEnforcementHooks({ logger, socket }) {
+export function registerEnforcementHooks({ socket }) {
   // Facts only; each recipient builds the text itself (see renderRejection).
   const notify = (payload, actor, self) => {
-    const targets = resolveNotificationTargets(getNotifyScope(), { actor, self });
+    const targets = resolveNotificationTargets(getModuleSetting("notifyScope"), { actor, self });
     socket.executeForUsers("notifyExceedRemote", targets, payload);
   };
 
   const notifyRestriction = ({ actor, actorName, containerName, itemName, restrictions }, self) => {
     notify({ type: "restriction", containerName, itemName, restrictions }, actor, self);
-    logger.info("container restriction failed", {
+    LOG.info("container restriction failed", {
       actorName, containerName, itemName, restrictions
     });
-  };
-
-  const enforceRestrictions = (actor, container, itemData, self) => {
-    const result = validateContainerRestrictions(container, itemData, {
-      weaponTypeMap: getWeaponTypeMap()
-    });
-    if (result.ok) return true;
-    notifyRestriction({
-      actor,
-      actorName: actor?.name,
-      containerName: container?.name,
-      itemName: itemData?.name,
-      restrictions: result.restrictions
-    }, self);
-    return game.settings.get(MODULE_ID, "enforceMode") !== "block";
   };
 
   const notifyCapacity = (violation, actor, self) => {
@@ -275,53 +209,34 @@ export function registerEnforcementHooks({ logger, socket }) {
       delta: violation.delta
     };
     notify(data, actor, self);
-    logger.info("capacity exceeded", data);
+    LOG.info("capacity exceeded", data);
   };
 
   /**
    * Check items on one actor as they would be after a change, notify about the
-   * first rule broken, and say whether the change may go ahead.
-   * @param {Object} actor
-   * @param {Object[]} candidates  Changed or created items, as plain data.
-   * @param {string[]} [self]      Users who made the change; this client's user when omitted.
-   * @returns {boolean}
+   * rule(s) broken, and say whether the change may go ahead.
    */
   const enforceCandidates = (actor, candidates, self) => {
-    const projectedActor = createProjectedActor(actor, candidates);
+    const block = getModuleSetting("enforceMode") === "block";
+    const outcome = evaluateContainerChange(actor, candidates, { stopOnRestriction: block });
+    if (outcome.ok) return true;
 
-    // Only validate content rules when an item is actually entering a
-    // container. Re-checking on every edit freezes anything already inside a
-    // container whose rules were tightened afterwards - it could not even be
-    // equipped or renamed. Contents created together with their container find
-    // no destination on the actor yet, so they pass.
-    for (const candidate of candidates) {
-      const destinationId = candidate.system?.container ?? null;
-      const previousId = getItem(actor, candidate.id)?.system?.container ?? null;
-      if (!destinationId || destinationId === previousId || !getItem(actor, destinationId)) continue;
-      const destination = getItem(projectedActor, destinationId);
-      if (!enforceRestrictions(actor, destination, candidate, self)) return false;
+    for (const failure of outcome.restrictionFailures) {
+      notifyRestriction({
+        actor,
+        actorName: actor?.name,
+        containerName: failure.container?.name,
+        itemName: failure.itemData?.name,
+        restrictions: failure.restrictions
+      }, self);
+      if (block) return false;
     }
 
-    const violations = findCapacityViolations(actor, projectedActor, {
-      includeNested: game.settings.get(MODULE_ID, "includeNested"),
-      defaultUnit: getSystemWeightUnit(),
-      currencyLbs: containerCurrencyLbs,
-      onCycle: containerId => logger.warn("Cycle detected", { containerId })
-    });
-    if (!violations.length) return true;
-
-    const preferredOrder = candidates.flatMap(candidate => [
-      ...(candidate.system?.container
-        ? collectContainerAncestorIds(projectedActor, candidate.system.container)
-        : []),
-      ...(isContainer(candidate) && candidate.id ? [candidate.id] : [])
-    ]);
-    const violation = preferredOrder
-      .map(containerId => violations.find(entry => entry.container.id === containerId))
-      .find(Boolean) ?? violations[0];
-
-    notifyCapacity(violation, actor, self);
-    return game.settings.get(MODULE_ID, "enforceMode") !== "block";
+    if (outcome.capacityViolation) {
+      notifyCapacity(outcome.capacityViolation, actor, self);
+      if (block) return false;
+    }
+    return true;
   };
 
   const enforceProjectedItemChange = (item, changes, options, { isCreate }) => {
@@ -349,8 +264,6 @@ export function registerEnforcementHooks({ logger, socket }) {
   // among the receiving actor's owners. In warn mode the guard warns and lets
   // the operation run: the document hooks above see each item alone and miss
   // a container that arrives with its contents.
-  // shortcut: a change that lands on the same actor between this check and
-  // Item Piles' commit is not seen; lock the actor if that ever matters.
   const itemPilesGuarded = registerItemPilesGuards(({ actor, itemsToCreate = [], itemsToUpdate = [] }) => {
     if (!actor?.items) return true;
     const candidates = [
@@ -364,7 +277,7 @@ export function registerEnforcementHooks({ logger, socket }) {
     return enforceCandidates(actor, candidates, [...new Set([game.user?.id, ...owners])].filter(Boolean));
   });
   if (itemPilesGuarded) {
-    logger.info("Item Piles transfers are checked before they run", {
+    LOG.info("Item Piles transfers are checked before they run", {
       dnd5eBridge: isModuleActive(ITEM_PILES_DND5E_ID)
     });
   }

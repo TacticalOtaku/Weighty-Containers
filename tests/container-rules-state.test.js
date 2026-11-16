@@ -26,7 +26,7 @@ const makeState = () => new ContainerRulesState({
   }
 });
 
-test("container rules state owns selections, conflicts, and unavailable subtypes", () => {
+test("container rules state owns selections, conflicts, labels, and unavailable subtypes", () => {
   const state = makeState();
 
   assert.deepEqual(state.unavailableSubtypeValues(), ["potion"]);
@@ -34,6 +34,10 @@ test("container rules state owns selections, conflicts, and unavailable subtypes
   assert.deepEqual(state.selectionLabels("requiredProperties"), [
     { value: "mgc", label: "Magical" },
     { value: "hvy", label: "Heavy" }
+  ]);
+  assert.deepEqual(state.labelsFor("allowedTypes", ["weapon", "custom"]), [
+    { value: "weapon", label: "Weapon" },
+    { value: "custom", label: "custom" }
   ]);
 
   state.removeUnavailableSubtypes();
@@ -43,7 +47,7 @@ test("container rules state owns selections, conflicts, and unavailable subtypes
   assert.deepEqual(state.forbiddenProperties, []);
 });
 
-test("container rules state produces stable snapshots and persistence payloads", () => {
+test("container rules state produces stable snapshots, summaries, and persistence payloads", () => {
   const state = makeState();
   const initial = state.snapshot();
 
@@ -60,4 +64,12 @@ test("container rules state produces stable snapshots and persistence payloads",
     forbiddenProperties: ["hvy"],
     propertyMatchMode: "any"
   });
+
+  const summary = state.summaryLines({
+    format: (key, args) => `${key}:${JSON.stringify(args)}`,
+    localize: key => key
+  });
+  assert.equal(summary.length, 5);
+  assert.match(summary[0], /"pct":100/);
+  assert.match(summary[3], /requiredAny/);
 });

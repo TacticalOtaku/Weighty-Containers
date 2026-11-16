@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 import {
   convertWeightToLbs,
   getCapacityLbs,
-  getReductionPct,
   ownWeightLbs
 } from "../scripts/core/weight.js";
 
@@ -19,12 +18,6 @@ test("ownWeightLbs multiplies the unit weight by the quantity", () => {
   assert.equal(ownWeightLbs({
     system: { weight: { value: 2, units: "lb" }, quantity: 3 }
   }), 6);
-});
-
-test("getReductionPct clamps invalid flag values", () => {
-  assert.equal(getReductionPct({ flags: { "weighty-containers": { reductionPct: 150 } } }), 100);
-  assert.equal(getReductionPct({ flags: { "weighty-containers": { reductionPct: -10 } } }), 0);
-  assert.equal(getReductionPct({ flags: { "weighty-containers": { reductionPct: "bad" } } }), 0);
 });
 
 test("getCapacityLbs reads dnd5e's weight capacity", () => {

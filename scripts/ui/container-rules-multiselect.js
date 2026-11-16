@@ -1,8 +1,116 @@
 import { I18N } from "../constants.js";
-import { normalizeToken, parseTokenList } from "../core/restrictions.js";
-import { clamp } from "../core/weight.js";
-import { RULE_SELECTION_NAMES } from "./container-rules-state.js";
-import { escapeHtml } from "./rule-presentation.js";
+import { RULE_SELECTION_NAMES, normalizeToken, parseTokenList } from "../core/rules.js";
+
+export function escapeHtml(value) {
+  const text = String(value ?? "");
+  const escape = globalThis.foundry?.utils?.escapeHTML;
+  if (escape) return escape(text);
+  return text.replace(/[&<>"']/g, c => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;"
+  }[c]));
+}
+
+export function prepareRuleGroups(groups, selectedValues) {
+  const selected = new Set(parseTokenList(selectedValues));
+  const known = new Set(
+    groups.flatMap(group => group.options.map(option => normalizeToken(option.value)))
+  );
+  const unknownOptions = Array.from(selected)
+    .filter(value => !known.has(value))
+    .map(value => ({ value, label: value }));
+  if (!unknownOptions.length) return groups;
+  return [...groups, {
+    key: "savedValues",
+    label: game.i18n.localize(`${I18N}.configDialog.groups.savedValues`),
+    options: unknownOptions,
+    saved: true,
+    types: []
+  }];
+}
+
+export function renderRuleMultiselect({
+  name,
+  groups,
+  selectedValues,
+  placeholder,
+  idPrefix = "wc"
+}) {
+  const selected = new Set(parseTokenList(selectedValues));
+  const allGroups = prepareRuleGroups(groups, selectedValues);
+  // Several rules windows can be open at once; ids must not collide.
+  const panelId = `${idPrefix}-${name}-options`;
+  const checkedAttr = value => selected.has(normalizeToken(value)) ? " checked" : "";
+  const groupMarkup = allGroups.map((group, groupIndex) => {
+    const groupKey = group.key ?? `group-${groupIndex}`;
+    const groupTypes = (group.types ?? []).map(normalizeToken).filter(Boolean).join(",");
+    const options = group.options.map(option => {
+      const value = normalizeToken(option.value);
+      return `
+        <label class="cr-option-row" data-search="${escapeHtml(`${option.label} ${value}`.toLocaleLowerCase())}">
+          <input type="checkbox" name="${escapeHtml(name)}" value="${escapeHtml(value)}"
+                 data-label="${escapeHtml(option.label)}"${checkedAttr(value)}>
+          <span class="cr-checkbox-mark" aria-hidden="true"><i class="fa-solid fa-check"></i></span>
+          <span class="cr-option-label">${escapeHtml(option.label)}</span>
+        </label>`;
+    }).join("");
+    return `
+      <section class="cr-option-group" data-group="${escapeHtml(groupKey)}"
+               data-types="${escapeHtml(groupTypes)}"${group.saved ? ' data-saved="true"' : ""}>
+        <label class="cr-option-group-header">
+          <input type="checkbox" data-group-toggle="true">
+          <span class="cr-checkbox-mark" aria-hidden="true"><i class="fa-solid fa-check"></i></span>
+          <span>${escapeHtml(group.label)}</span>
+          <span class="cr-group-count" aria-hidden="true"></span>
+        </label>
+        <div class="cr-option-group-items">${options}</div>
+      </section>`;
+  }).join("");
+
+  return `
+    <div class="cr-multiselect" data-select="${escapeHtml(name)}" data-placeholder="${escapeHtml(placeholder)}">
+      <div class="cr-combobox" role="combobox" tabindex="0" aria-haspopup="listbox"
+           aria-expanded="false" aria-controls="${escapeHtml(panelId)}">
+        <div class="cr-selection" data-selection></div>
+        <button type="button" class="cr-icon-button cr-select-clear" data-action="clearSelect"
+                data-select-name="${escapeHtml(name)}" aria-label="${escapeHtml(game.i18n.localize(`${I18N}.configDialog.actions.clear`))}"
+                title="${escapeHtml(game.i18n.localize(`${I18N}.configDialog.actions.clear`))}">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+        <button type="button" class="cr-icon-button cr-select-toggle" data-action="toggleSelect"
+                data-select-name="${escapeHtml(name)}" aria-label="${escapeHtml(game.i18n.localize(`${I18N}.configDialog.actions.open`))}">
+          <i class="fa-solid fa-chevron-down"></i>
+        </button>
+      </div>
+      <div id="${escapeHtml(panelId)}" class="cr-select-panel" role="listbox" aria-multiselectable="true"
+           popover="manual" hidden>
+        <div class="cr-select-toolbar">
+          <label class="cr-search">
+            <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+            <input type="search" data-select-search autocomplete="off"
+                   placeholder="${escapeHtml(game.i18n.localize(`${I18N}.configDialog.search`))}">
+          </label>
+          <div class="cr-select-actions">
+            <button type="button" data-action="selectVisible" data-select-name="${escapeHtml(name)}">
+              ${escapeHtml(game.i18n.localize(`${I18N}.configDialog.actions.selectVisible`))}
+            </button>
+            <button type="button" data-action="deselectVisible" data-select-name="${escapeHtml(name)}">
+              ${escapeHtml(game.i18n.localize(`${I18N}.configDialog.actions.deselectVisible`))}
+            </button>
+            <button type="button" data-action="clearSelect" data-select-name="${escapeHtml(name)}">
+              ${escapeHtml(game.i18n.localize(`${I18N}.configDialog.actions.clear`))}
+            </button>
+            <span class="cr-select-total" data-select-total></span>
+          </div>
+        </div>
+        <div class="cr-options anvil-scroll">${groupMarkup}</div>
+        <div class="cr-select-result" data-select-result></div>
+      </div>
+    </div>`;
+}
 
 export class ContainerRulesMultiselectController {
   constructor({ rules, getElement, animate, onSelectionChange }) {
@@ -16,8 +124,24 @@ export class ContainerRulesMultiselectController {
     return this.getElement();
   }
 
+  setRules(rules) {
+    this.rules = rules;
+  }
+
   root(name) {
     return this.element?.querySelector?.(`.cr-multiselect[data-select="${name}"]`) ?? null;
+  }
+
+  setPropertyError(hasErrors) {
+    for (const name of ["requiredProperties", "forbiddenProperties"]) {
+      const root = this.root(name);
+      root?.classList.toggle("is-invalid", hasErrors);
+      root?.querySelector(".cr-combobox")?.setAttribute("aria-invalid", String(hasErrors));
+    }
+  }
+
+  focusSelect(name) {
+    this.root(name)?.querySelector(".cr-combobox")?.focus();
   }
 
   setSelection(name, values) {
@@ -44,13 +168,19 @@ export class ContainerRulesMultiselectController {
     this.onSelectionChange(changed);
   }
 
-  syncSelection(name) {
-    const root = this.root(name);
-    const selected = new Set(this.rules.getSelection(name));
-    for (const input of root?.querySelectorAll?.('.cr-option-row input[type="checkbox"]') ?? []) {
-      input.checked = selected.has(normalizeToken(input.value));
+  syncInputs(names = RULE_SELECTION_NAMES) {
+    for (const name of names) {
+      const root = this.root(name);
+      const selected = new Set(this.rules.getSelection(name));
+      for (const input of root?.querySelectorAll?.('.cr-option-row input[type="checkbox"]') ?? []) {
+        input.checked = selected.has(normalizeToken(input.value));
+      }
     }
-    this.refresh(root);
+  }
+
+  syncSelection(name) {
+    this.syncInputs([name]);
+    this.refresh(this.root(name));
     if (name === "allowedTypes") {
       this.applyFilter(this.root("allowedSubtypes"));
       this.refreshSubtypeWarning();
@@ -162,7 +292,7 @@ export class ContainerRulesMultiselectController {
     const allowedTypes = new Set(this.rules.allowedTypes);
     const showUnavailable = root.classList.contains("show-unavailable");
     for (const group of root.querySelectorAll(".cr-option-group")) {
-      const groupTypes = parseTokenList(group.dataset.types?.replaceAll(" ", ","));
+      const groupTypes = parseTokenList(group.dataset.types);
       const typeAvailable = root.dataset.select !== "allowedSubtypes"
         || !allowedTypes.size
         || (!group.hasAttribute("data-saved") && (
@@ -261,7 +391,7 @@ export class ContainerRulesMultiselectController {
     const current = visible.indexOf(rowInput);
     const index = event.key === "Home" ? 0
       : event.key === "End" ? visible.length - 1
-        : clamp(current + (event.key === "ArrowDown" ? 1 : -1), 0, visible.length - 1);
+        : Math.min(visible.length - 1, Math.max(0, current + (event.key === "ArrowDown" ? 1 : -1)));
     visible[index]?.focus();
     return true;
   }

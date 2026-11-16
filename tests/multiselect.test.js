@@ -1,12 +1,22 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { ContainerRulesMultiselectController } from "../scripts/ui/container-rules-multiselect.js";
+import {
+  ContainerRulesMultiselectController,
+  prepareRuleGroups,
+  renderRuleMultiselect
+} from "../scripts/ui/container-rules-multiselect.js";
 import { ContainerRulesState } from "../scripts/ui/container-rules-state.js";
 
-// The smallest DOM the controller needs: compound selectors (tag, .class,
-// [attr], [attr="value"]) joined by descendant spaces, closest() and matches().
 const camel = name => name.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+const decodeEntities = text => text
+  .replaceAll("&amp;", "&")
+  .replaceAll("&lt;", "<")
+  .replaceAll("&gt;", ">")
+  .replaceAll("&quot;", "\"")
+  .replaceAll("&#39;", "'");
+
+const VOID_TAGS = new Set(["input", "br", "hr", "img", "meta", "link"]);
 
 class FakeElement {
   constructor(tag, { classes = [], attrs = {}, data = {} } = {}, children = []) {
@@ -14,11 +24,12 @@ class FakeElement {
     this.classSet = new Set(classes);
     this.attrs = { ...attrs };
     this.dataset = { ...data };
-    this.hidden = false;
-    this.checked = false;
+    this.hidden = "hidden" in attrs;
+    this.checked = "checked" in attrs;
     this.indeterminate = false;
     this.value = attrs.value ?? "";
     this.textContent = "";
+    this.title = attrs.title ?? "";
     this.parent = null;
     this.children = children;
     for (const child of children) child.parent = this;
@@ -33,6 +44,12 @@ class FakeElement {
     };
   }
 
+  appendChild(child) {
+    child.parent = this;
+    this.children.push(child);
+    return child;
+  }
+
   hasAttribute(name) {
     if (name.startsWith("data-")) return camel(name.slice(5)) in this.dataset;
     return name in this.attrs;
@@ -43,7 +60,9 @@ class FakeElement {
     return this.attrs[name] ?? null;
   }
 
-  setAttribute(name, value) { this.attrs[name] = String(value); }
+  setAttribute(name, value) {
+    this.attrs[name] = String(value);
+  }
 
   matchesCompound(compound) {
     const tag = compound.match(/^[a-z]+/)?.[0];
@@ -88,55 +107,67 @@ class FakeElement {
   }
 }
 
-const h = (tag, options, children) => new FakeElement(tag, options, children);
-
-function row(name, value, label) {
-  return h("label", { classes: ["cr-option-row"], data: { search: `${label} ${value}`.toLowerCase() } }, [
-    h("input", { attrs: { type: "checkbox", name, value } })
-  ]);
-}
-
-function group(name, key, types, options) {
-  return h("section", { classes: ["cr-option-group"], data: { group: key, types: types.join(" ") } }, [
-    h("label", { classes: ["cr-option-group-header"] }, [
-      h("input", { attrs: { type: "checkbox" }, data: { groupToggle: "true" } }),
-      h("span", { classes: ["cr-group-count"] })
-    ]),
-    h("div", { classes: ["cr-option-group-items"] }, options.map(([value, label]) => row(name, value, label)))
-  ]);
-}
-
-function multiselect(name, groups) {
-  return h("div", { classes: ["cr-multiselect"], data: { select: name, placeholder: name } }, [
-    h("div", { classes: ["cr-combobox"] }, [h("div", { data: { selection: "" } })]),
-    h("div", { classes: ["cr-select-panel"] }, [
-      h("input", { attrs: { type: "search" }, data: { selectSearch: "" } }),
-      h("div", { classes: ["cr-options"] }, groups)
-    ])
-  ]);
+/**
+ * Parse real rendered HTML from `renderRuleMultiselect` into `FakeElement` nodes
+ * so selector/attribute leaks between rendering and DOM control fail here.
+ */
+function parseHtml(html) {
+  const root = new FakeElement("form");
+  const stack = [root];
+  const tokenPattern = /<\/([a-z0-9-]+)>|<([a-z0-9-]+)([^>]*)>/gi;
+  for (const match of html.matchAll(tokenPattern)) {
+    if (match[1]) {
+      if (stack.length > 1) stack.pop();
+      continue;
+    }
+    const tag = match[2].toLowerCase();
+    const rawAttrs = match[3] ?? "";
+    const attrs = {};
+    const data = {};
+    for (const attr of rawAttrs.matchAll(/([a-z0-9-]+)(?:="([^"]*)")?/gi)) {
+      const name = attr[1];
+      const val = attr[2] === undefined ? "" : decodeEntities(attr[2]);
+      if (name.startsWith("data-")) data[camel(name.slice(5))] = val;
+      else attrs[name] = val;
+    }
+    const classes = (attrs.class ?? "").trim().split(/\s+/).filter(Boolean);
+    const node = new FakeElement(tag, { classes, attrs, data });
+    stack.at(-1).appendChild(node);
+    if (!VOID_TAGS.has(tag)) stack.push(node);
+  }
+  return root;
 }
 
 function setup() {
+  globalThis.foundry = { utils: {} };
   globalThis.game = { i18n: { localize: key => key, format: key => key } };
-  const typeOptions = [["weapon", "Weapon"], ["consumable", "Consumable"]];
-  const weaponOptions = [["simpleM", "Simple Melee"], ["martialR", "Martial Ranged"]];
-  const consumableOptions = [["potion", "Potion"], ["ammo", "Ammunition"]];
+  const typeOptions = [["weapon", "Weapon"], ["consumable", "Consumable"]].map(([value, label]) => ({ value, label }));
+  const weaponOptions = [["simpleM", "Simple Melee"], ["martialR", "Martial Ranged"]].map(([value, label]) => ({ value, label }));
+  const consumableOptions = [["potion", "Potion"], ["ammo", "Ammunition"]].map(([value, label]) => ({ value, label }));
   const catalogs = {
-    allowedTypes: [{ label: "Types", options: typeOptions.map(([value, label]) => ({ value, label })) }],
+    allowedTypes: [{ key: "types", label: "Types", options: typeOptions }],
     allowedSubtypes: [
-      { key: "weaponTypes", label: "Weapons", types: ["weapon"], options: weaponOptions.map(([value, label]) => ({ value, label })) },
-      { key: "consumableTypes", label: "Consumables", types: ["consumable"], options: consumableOptions.map(([value, label]) => ({ value, label })) }
+      { key: "weaponTypes", label: "Weapons", types: ["weapon"], options: weaponOptions },
+      { key: "consumableTypes", label: "Consumables", types: ["consumable"], options: consumableOptions }
     ],
     requiredProperties: [],
     forbiddenProperties: []
   };
-  const element = h("form", {}, [
-    multiselect("allowedTypes", [group("allowedTypes", "types", [], typeOptions)]),
-    multiselect("allowedSubtypes", [
-      group("allowedSubtypes", "weaponTypes", ["weapon"], weaponOptions),
-      group("allowedSubtypes", "consumableTypes", ["consumable"], consumableOptions)
-    ])
-  ]);
+  const element = parseHtml([
+    renderRuleMultiselect({
+      name: "allowedTypes",
+      groups: catalogs.allowedTypes,
+      selectedValues: [],
+      placeholder: "allowedTypes"
+    }),
+    renderRuleMultiselect({
+      name: "allowedSubtypes",
+      groups: catalogs.allowedSubtypes,
+      selectedValues: [],
+      placeholder: "allowedSubtypes"
+    })
+  ].join(""));
+
   const rules = new ContainerRulesState({ draft: {}, catalogs });
   const changes = [];
   const controller = new ContainerRulesMultiselectController({
@@ -148,6 +179,26 @@ function setup() {
   controller.refreshAll();
   return { element, rules, controller, changes };
 }
+
+test("prepareRuleGroups adds savedValues group for unknown persisted tokens", () => {
+  globalThis.game = { i18n: { localize: key => key } };
+  const groups = [{
+    key: "known",
+    label: "Known",
+    options: [{ value: "weapon", label: "Weapon" }]
+  }];
+
+  assert.deepEqual(prepareRuleGroups(groups, ["weapon", "custom"]), [
+    groups[0],
+    {
+      key: "savedValues",
+      label: "WC.configDialog.groups.savedValues",
+      options: [{ value: "custom", label: "custom" }],
+      saved: true,
+      types: []
+    }
+  ]);
+});
 
 test("a group toggle selects every option of its group and nothing else", () => {
   const { element, rules, controller, changes } = setup();
@@ -181,7 +232,7 @@ test("search narrows the rows, and bulk selection only takes what is visible", (
 
   controller.applyFilter(subtypes);
   assert.equal(element.querySelector('.cr-option-group[data-group="consumableTypes"]').hidden, true);
-  assert.deepEqual(controller.visibleRowInputs(subtypes).map(input => input.value), ["martialR"]);
+  assert.deepEqual(controller.visibleRowInputs(subtypes).map(input => input.value), ["martialr"]);
 
   controller.bulkVisible("allowedSubtypes", true);
   assert.deepEqual(rules.allowedSubtypes, ["martialr"]);

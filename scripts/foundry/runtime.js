@@ -1,11 +1,14 @@
-import { LOG_LEVELS, I18N, MODULE_ID } from "../constants.js";
-import { convertWeightToLbs, lbsToUnit } from "../core/units.js";
-import { getReductionPct, isContainer, num } from "../core/weight.js";
+import { I18N, LOG_LEVELS, MODULE_ID } from "../constants.js";
+import { computeContainerLoadFromContents } from "../core/containers.js";
+import { getReductionPct } from "../core/rules.js";
+import { convertWeightToLbs, lbsToUnit } from "../core/weight.js";
 import {
   CONTAINER_DATA_MODEL_PATH,
   getContainerDataModelClass,
-  installUnitConversion
+  getSystemWeightUnit,
+  getUnitConversionTable
 } from "../integrations/dnd5e.js";
+import { LOG } from "./logger.js";
 
 export const NOTIFY_SCOPES = ["self", "selfAndGm", "everyone"];
 
@@ -15,7 +18,41 @@ export const NOTIFY_SCOPES = ["self", "selfAndGm", "everyone"];
  */
 export const THEMES = ["auto", "light", "dark"];
 
-export function registerModuleSettings(logger) {
+export const MODULE_SETTING_DEFAULTS = Object.freeze({
+  enforceMode: "block",
+  includeNested: true,
+  notifyScope: "selfAndGm",
+  theme: "auto",
+  logLevel: "warn",
+  logStacks: false,
+  logBufferLimit: 500,
+  exceedMessageText: ""
+});
+
+function parseNonNegativeInt(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+/**
+ * Read a module setting with a safe fallback to its canonical default when
+ * Foundry globals are not ready or mocked partially in tests.
+ */
+export function getModuleSetting(key) {
+  const fallback = MODULE_SETTING_DEFAULTS[key];
+  try {
+    const value = globalThis.game?.settings?.get?.(MODULE_ID, key);
+    return value === undefined ? fallback : value;
+  } catch {
+    return fallback;
+  }
+}
+
+export function setModuleSetting(key, value) {
+  return globalThis.game?.settings?.set?.(MODULE_ID, key, value);
+}
+
+export function registerModuleSettings() {
   Hooks.once("init", () => {
     // i18n is initialised *after* the init hook, so localizing here would store
     // raw keys. Foundry localizes setting names, hints and choice labels when
@@ -31,7 +68,7 @@ export function registerModuleSettings(logger) {
         block: `${I18N}.enforceMode.block`,
         warn: `${I18N}.enforceMode.warn`
       },
-      default: "block"
+      default: MODULE_SETTING_DEFAULTS.enforceMode
     });
     game.settings.register(MODULE_ID, "includeNested", {
       name: `${I18N}.includeNested.name`,
@@ -40,7 +77,7 @@ export function registerModuleSettings(logger) {
       config: true,
       restricted: true,
       type: Boolean,
-      default: true,
+      default: MODULE_SETTING_DEFAULTS.includeNested,
       // Only the capacity bar (computed when a container sheet renders) and
       // enforcement read this; encumbrance always counts nested contents, so
       // no actor needs re-preparing - redrawing open container sheets is enough.
@@ -61,7 +98,7 @@ export function registerModuleSettings(logger) {
         scope,
         `${I18N}.notifyScope.${scope}`
       ])),
-      default: "selfAndGm"
+      default: MODULE_SETTING_DEFAULTS.notifyScope
     });
     game.settings.register(MODULE_ID, "theme", {
       name: `${I18N}.theme.name`,
@@ -74,7 +111,7 @@ export function registerModuleSettings(logger) {
         theme,
         `${I18N}.theme.${theme}`
       ])),
-      default: "auto",
+      default: MODULE_SETTING_DEFAULTS.theme,
       onChange: () => {
         for (const app of foundry.applications?.instances?.values() ?? []) {
           app.applyAnvilTheme?.();
@@ -92,8 +129,8 @@ export function registerModuleSettings(logger) {
         level,
         `${I18N}.logLevel.${level}`
       ])),
-      default: "warn",
-      onChange: value => logger.setLevel(value)
+      default: MODULE_SETTING_DEFAULTS.logLevel,
+      onChange: value => LOG.setLevel(value)
     });
     game.settings.register(MODULE_ID, "logStacks", {
       name: `${I18N}.logStacks.name`,
@@ -102,8 +139,8 @@ export function registerModuleSettings(logger) {
       config: true,
       restricted: false,
       type: Boolean,
-      default: false,
-      onChange: value => { logger.withStacks = value; }
+      default: MODULE_SETTING_DEFAULTS.logStacks,
+      onChange: value => { LOG.withStacks = value; }
     });
     game.settings.register(MODULE_ID, "logBufferLimit", {
       name: `${I18N}.logBufferLimit.name`,
@@ -112,8 +149,10 @@ export function registerModuleSettings(logger) {
       config: true,
       restricted: false,
       type: Number,
-      default: 500,
-      onChange: value => { logger.bufferLimit = Math.max(0, num(value, 500)); }
+      default: MODULE_SETTING_DEFAULTS.logBufferLimit,
+      onChange: value => {
+        LOG.bufferLimit = parseNonNegativeInt(value, MODULE_SETTING_DEFAULTS.logBufferLimit);
+      }
     });
     // World scope: the text is shown to whoever the rejection is sent to, so
     // it has to be the GM's text, not whatever the acting player typed into
@@ -125,34 +164,17 @@ export function registerModuleSettings(logger) {
       config: true,
       restricted: true,
       type: String,
-      default: ""
+      default: MODULE_SETTING_DEFAULTS.exceedMessageText
     });
 
-    try {
-      logger.setLevel(game.settings.get(MODULE_ID, "logLevel"));
-      logger.withStacks = game.settings.get(MODULE_ID, "logStacks");
-      logger.bufferLimit = Math.max(
-        0,
-        num(game.settings.get(MODULE_ID, "logBufferLimit"), 500)
-      );
-    } catch {
-      // Logging settings are optional here: the logger keeps its defaults.
-    }
-    logger.info("init complete");
+    LOG.setLevel(getModuleSetting("logLevel"));
+    LOG.withStacks = Boolean(getModuleSetting("logStacks"));
+    LOG.bufferLimit = parseNonNegativeInt(
+      getModuleSetting("logBufferLimit"),
+      MODULE_SETTING_DEFAULTS.logBufferLimit
+    );
+    LOG.info("init complete");
   });
-}
-
-/**
- * Adopt dnd5e's weight conversion table once CONFIG.DND5E is populated.
- * Runs at `setup`, before any sheet or actor data is prepared for display.
- */
-export function registerUnitConversion(logger) {
-  const install = () => {
-    if (installUnitConversion()) logger.info("weight conversion adopted from CONFIG.DND5E");
-    else logger.warn("CONFIG.DND5E.weightUnits not found - using built-in conversion");
-  };
-  Hooks.once("setup", install);
-  Hooks.once("ready", install);
 }
 
 /**
@@ -161,32 +183,26 @@ export function registerUnitConversion(logger) {
  * actor is prepared with the reduction from the start. Only if that fails is
  * it retried at `ready`, followed by a one-off re-preparation of the actors.
  */
-export function registerContainerPatch(logger) {
+export function registerContainerPatch() {
   let patched = false;
   Hooks.once("setup", () => {
-    patched = patchContainerDataGetters({ logger });
+    patched = patchContainerDataGetters();
   });
   Hooks.once("ready", () => {
     if (patched) return;
-    if (patchContainerDataGetters({ logger })) refreshPreparedActors(logger);
+    if (patchContainerDataGetters()) refreshPreparedActors();
   });
 }
 
 /**
  * Scale dnd5e's own contents weight by the container's reduction.
- *
- * Everything else is left to the system: `contentsWeight` already walks
- * sub-containers, honours `weightlessContents`, adds carried currency and
- * returns the number in the container's own `weight.units`. Because
- * `ContainerData#totalWeight` is built on this getter, and the actor's
- * encumbrance is built on `totalWeightIn()`, patching this one place makes the
- * reduction show up on the capacity bar, the inventory row and the encumbrance
- * track at once - with no second implementation to drift out of sync.
  */
-export function patchContainerDataGetters({ logger, includeNested = readIncludeNested }) {
+export function patchContainerDataGetters({
+  includeNested = () => getModuleSetting("includeNested") !== false
+} = {}) {
   const containerDataClass = getContainerDataModelClass();
   if (!containerDataClass) {
-    logger.error(
+    LOG.error(
       `Could not find ContainerData at ${CONTAINER_DATA_MODEL_PATH}. `
       + "Weight reduction will not be applied to sheets or encumbrance."
     );
@@ -195,13 +211,13 @@ export function patchContainerDataGetters({ logger, includeNested = readIncludeN
 
   const prototype = containerDataClass.prototype;
   if (prototype[`__${MODULE_ID}_patched`]) {
-    logger.debug("ContainerData already patched");
+    LOG.debug("ContainerData already patched");
     return true;
   }
 
   const descriptor = Object.getOwnPropertyDescriptor(prototype, "contentsWeight");
   if (!descriptor?.get) {
-    logger.error("contentsWeight getter not found on ContainerData prototype", {
+    LOG.error("contentsWeight getter not found on ContainerData prototype", {
       protoKeys: Object.getOwnPropertyNames(prototype)
     });
     return false;
@@ -225,43 +241,40 @@ export function patchContainerDataGetters({ logger, includeNested = readIncludeN
     configurable: true,
     enumerable: descriptor.enumerable ?? true
   });
-  patchComputeCapacity(prototype, { logger, includeNested });
+  patchComputeCapacity(prototype, { includeNested });
   Object.defineProperty(prototype, `__${MODULE_ID}_patched`, {
     value: true,
     enumerable: false
   });
-  logger.info("Patched ContainerData.contentsWeight getter");
+  LOG.info("Patched ContainerData.contentsWeight getter");
   return true;
-}
-
-function readIncludeNested() {
-  try {
-    return game.settings.get(MODULE_ID, "includeNested") !== false;
-  } catch {
-    return true;
-  }
 }
 
 /**
  * Contents weight of a container counting sub-containers by their own weight
- * only, in the container's weight units, with its reduction applied. This is
- * what the module enforces when "Include nested containers" is off.
+ * only, in the container's weight units, with its reduction applied. Delegates
+ * to core load calculation so capacity bars never drift from enforcement.
  * @returns {number|Promise<number>}
  */
 export function directContentsWeight(containerData) {
-  const units = containerData.weight?.units;
-  const reduction = getReductionPct(containerData.parent) / 100;
+  const defaultUnit = getSystemWeightUnit();
+  const unitTable = getUnitConversionTable();
+  const units = containerData.weight?.units || defaultUnit;
+  const currencyLbs = () => convertWeightToLbs(
+    containerData.currencyWeight,
+    units,
+    defaultUnit,
+    unitTable
+  );
   const sum = contents => {
-    let total = Number(containerData.currencyWeight) || 0;
-    for (const child of contents ?? []) {
-      if (isContainer(child)) {
-        const own = convertWeightToLbs(child.system?.weight?.value, child.system?.weight?.units, units);
-        total += lbsToUnit(own, units || "lb");
-      } else {
-        total += Number(child.system?.totalWeightIn?.(units)) || 0;
-      }
-    }
-    return Math.max(0, Number((total * (1 - reduction)).toFixed(4)));
+    const result = computeContainerLoadFromContents(containerData.parent, contents ?? [], {
+      includeNested: false,
+      defaultUnit,
+      unitTable,
+      currencyLbs
+    });
+    const loadLbs = result?.load ?? 0;
+    return Math.max(0, Number(lbsToUnit(loadLbs, units, unitTable).toFixed(4)));
   };
   const contents = containerData.contents;
   if (contents instanceof Promise) return contents.then(sum);
@@ -273,10 +286,10 @@ export function directContentsWeight(containerData) {
  * excluded. Encumbrance is left alone - the weight is still carried - only
  * the container's own "how full am I" reading changes.
  */
-function patchComputeCapacity(prototype, { logger, includeNested }) {
+function patchComputeCapacity(prototype, { includeNested }) {
   const original = prototype.computeCapacity;
   if (typeof original !== "function") {
-    logger.debug("computeCapacity not found on ContainerData; capacity bar left as is");
+    LOG.debug("computeCapacity not found on ContainerData; capacity bar left as is");
     return;
   }
   prototype.computeCapacity = async function computeCapacityWithRules(...args) {
@@ -295,25 +308,21 @@ function patchComputeCapacity(prototype, { logger, includeNested }) {
 
 /**
  * Recompute every actor once after the patch lands.
- *
- * Actor data is prepared during world load, before `ready`, so without this the
- * first thing a GM sees is the unreduced encumbrance until something happens to
- * touch the actor.
  */
-export function refreshPreparedActors(logger) {
+export function refreshPreparedActors() {
   let refreshed = 0;
   for (const actor of game.actors ?? []) {
     try {
       actor.reset();
       refreshed += 1;
     } catch (error) {
-      logger.warn("Could not refresh actor after patching", { actor: actor?.name, error });
+      LOG.warn("Could not refresh actor after patching", { actor: actor?.name, error });
     }
   }
   for (const token of game.scenes?.contents?.flatMap(scene => scene.tokens.contents) ?? []) {
     if (token.actorLink || !token.actor) continue;
     try { token.actor.reset(); } catch { /* one broken synthetic actor must not stop the others */ }
   }
-  logger.info("refreshed prepared actors", { refreshed });
+  LOG.info("refreshed prepared actors", { refreshed });
   return refreshed;
 }

@@ -9,148 +9,242 @@ import {
   installPublicApi,
   notifyContainerRulesUpdated
 } from "../scripts/foundry/api.js";
+import { getContainerRawPreviewWeight } from "../scripts/foundry/containers.js";
 import { ItemCollectionView } from "../scripts/core/containers.js";
+import { buildDebugApi } from "../scripts/foundry/debug.js";
 
-const LBS_PER_KG = 2.20462;
-
-function makeDeps(overrides = {}) {
-  return {
-    computeActorCarriedLbs: () => 0,
-    computeAdjustedLoad: () => ({ load: 0, trace: [] }),
-    getCarriedShare: () => 1,
-    getCapacityLbs: () => null,
-    lbsToDisplay: lbs => lbs,
-    getSystemWeightUnit: () => "lb",
-    validateContainerRestrictions: () => ({ ok: true, restrictions: {} }),
-    openRulesDialog: async () => "opened",
-    ...overrides
+function withRuntime({ metric = false, includeNested = true } = {}, fn) {
+  const prevGame = globalThis.game;
+  const prevConfig = globalThis.CONFIG;
+  globalThis.CONFIG = {
+    DND5E: {
+      weaponTypeMap: { martialM: "martial" }
+    }
   };
+  globalThis.game = {
+    settings: {
+      get(moduleId, key) {
+        if (moduleId === "dnd5e" && key === "metricWeightUnits") return metric;
+        if (moduleId === "weighty-containers" && key === "includeNested") return includeNested;
+        return undefined;
+      }
+    }
+  };
+  try {
+    return fn();
+  } finally {
+    globalThis.game = prevGame;
+    globalThis.CONFIG = prevConfig;
+  }
 }
 
-function makeActor(container) {
-  return { items: new Map([[container.id, container]]) };
-}
+const makeItem = ({
+  id,
+  name = id,
+  type = "loot",
+  container = null,
+  weight = 0,
+  units = "lb",
+  quantity = 1,
+  capacity = null,
+  count = null,
+  reduction = 0,
+  properties = []
+}) => ({
+  id,
+  name,
+  type,
+  system: {
+    container,
+    weight: { value: weight, units },
+    quantity,
+    properties: new Set(properties),
+    ...(capacity == null && count == null
+      ? {}
+      : { capacity: { count, weight: { value: capacity, units } } })
+  },
+  flags: { "weighty-containers": { reductionPct: reduction } }
+});
+
+const makeActor = items => ({ items: new ItemCollectionView(items) });
 
 test("public api exposes the documented surface", () => {
-  const api = buildPublicApi(makeDeps());
+  const api = buildPublicApi();
 
   assert.equal(api.apiVersion, API_VERSION);
   assert.equal(api.stability, "stable");
 
   for (const name of [
     "isContainer",
+    "isWeightlessContainer",
     "getReductionPct",
     "getContainerRestrictions",
     "validateContainerRestrictions",
     "getCapacityLbs",
+    "getCapacityCount",
     "getContainerLoad",
     "computeAdjustedLoad",
     "computeActorCarriedLbs",
     "getCarriedShare",
     "lbsToDisplay",
     "getSystemWeightUnit",
-    "openRulesDialog"
+    "openRulesDialog",
+    "listRulePresets",
+    "registerRulePreset",
+    "unregisterRulePreset"
   ]) {
     assert.equal(typeof api[name], "function", `${name} must be callable`);
   }
 });
 
-test("getCarriedShare is passed through from the host", () => {
-  const calls = [];
-  const api = buildPublicApi(makeDeps({
-    getCarriedShare: (...args) => {
-      calls.push(args);
-      return 0.25;
-    }
-  }));
-  const actor = { items: new Map() };
-  const gem = { id: "gem" };
-  assert.equal(api.getCarriedShare(actor, gem), 0.25);
-  assert.deepEqual(calls, [[actor, gem]]);
+test("getCarriedShare computes real compounded and weightless shares through the public interface", () => {
+  withRuntime({}, () => {
+    const api = buildPublicApi();
+    const half = makeItem({ id: "half", type: "container", weight: 1, reduction: 50 });
+    const inner = makeItem({ id: "inner", type: "container", container: "half", weight: 1, reduction: 50 });
+    const holding = makeItem({ id: "holding", type: "container", properties: ["weightlessContents"] });
+    const gem = makeItem({ id: "gem", container: "inner", weight: 2 });
+    const hidden = makeItem({ id: "hidden", container: "holding", weight: 2 });
+    const actor = makeActor([half, inner, holding, gem, hidden]);
+
+    assert.equal(api.getCarriedShare(actor, gem), 0.25);
+    assert.equal(api.getCarriedShare(actor, hidden), 0);
+  });
 });
 
 test("openReductionDialog stays available for pre-API callers", async () => {
-  const api = buildPublicApi(makeDeps());
+  const api = buildPublicApi({ openRulesDialog: async () => "opened" });
   assert.equal(api.openReductionDialog, api.openRulesDialog);
   assert.equal(await api.openReductionDialog({}), "opened");
 });
 
-test("getContainerLoad reports load and capacity in both units", () => {
-  const container = { id: "bag", type: "container", flags: { "weighty-containers": { reductionPct: 50 } } };
-  const api = buildPublicApi(makeDeps({
-    computeAdjustedLoad: () => ({ load: 22.0462, trace: [] }),
-    getCapacityLbs: () => 44.0924,
-    lbsToDisplay: lbs => lbs / LBS_PER_KG,
-    getSystemWeightUnit: () => "kg"
-  }));
+test("getContainerLoad reports real adjusted load and capacity in metric and imperial units", () => {
+  withRuntime({ metric: true }, () => {
+    const api = buildPublicApi();
+    const bag = makeItem({
+      id: "bag",
+      type: "container",
+      units: "kg",
+      capacity: 20,
+      reduction: 50
+    });
+    const brick = makeItem({ id: "brick", container: "bag", weight: 20, units: "kg" });
+    const load = api.getContainerLoad(makeActor([bag, brick]), "bag");
 
-  const load = api.getContainerLoad(makeActor(container), "bag");
-
-  assert.equal(load.loadLbs, 22.05);
-  assert.equal(load.capacityLbs, 44.09);
-  assert.equal(load.load, 10);
-  assert.equal(load.capacity, 20);
-  assert.equal(load.unit, "kg");
-  assert.equal(load.reductionPct, 50);
-  assert.equal(load.pct, 50);
-  assert.equal(load.isOver, false);
-  assert.equal(load.hasCapacity, true);
+    // 20 kg * 2.5 lb/kg * (1 - 0.5) = 25 lb = 10 kg; capacity 20 kg = 50 lb
+    assert.equal(load.loadLbs, 25);
+    assert.equal(load.capacityLbs, 50);
+    assert.equal(load.load, 10);
+    assert.equal(load.capacity, 20);
+    assert.equal(load.unit, "kg");
+    assert.equal(load.reductionPct, 50);
+    assert.equal(load.pct, 50);
+    assert.equal(load.isOver, false);
+    assert.equal(load.hasCapacity, true);
+  });
 });
 
 test("getContainerLoad flags an overfilled container", () => {
-  const container = { id: "bag", type: "container", flags: {} };
-  const api = buildPublicApi(makeDeps({
-    computeAdjustedLoad: () => ({ load: 60, trace: [] }),
-    getCapacityLbs: () => 30
-  }));
+  withRuntime({}, () => {
+    const api = buildPublicApi();
+    const bag = makeItem({ id: "bag", type: "container", capacity: 30 });
+    const anvil = makeItem({ id: "anvil", container: "bag", weight: 60 });
+    const load = api.getContainerLoad(makeActor([bag, anvil]), "bag");
 
-  const load = api.getContainerLoad(makeActor(container), "bag");
-  assert.equal(load.isOver, true);
-  assert.equal(load.pct, 100, "the meter percentage is clamped");
+    assert.equal(load.isOver, true);
+    assert.equal(load.pct, 100, "the meter percentage is clamped");
+  });
 });
 
 test("getContainerLoad follows an item-count capacity, as dnd5e does", () => {
-  const quiver = {
-    id: "quiver",
-    type: "container",
-    flags: {},
-    system: { capacity: { count: 20, weight: { value: 50, units: "lb" } } }
-  };
-  const arrows = { id: "arrows", type: "consumable", system: { container: "quiver", quantity: 25 } };
-  const api = buildPublicApi(makeDeps({
-    computeAdjustedLoad: () => ({ load: 1.25, trace: [] }),
-    getCapacityLbs: () => 50
-  }));
+  withRuntime({}, () => {
+    const api = buildPublicApi();
+    const quiver = makeItem({
+      id: "quiver",
+      type: "container",
+      capacity: 50,
+      count: 20
+    });
+    const arrows = makeItem({
+      id: "arrows",
+      type: "consumable",
+      container: "quiver",
+      weight: 0.05,
+      quantity: 25
+    });
 
-  const load = api.getContainerLoad({ items: new ItemCollectionView([quiver, arrows]) }, "quiver");
-  assert.equal(load.kind, "count");
-  assert.equal(load.count, 25);
-  assert.equal(load.capacityCount, 20);
-  assert.equal(load.isOver, true);
-  assert.equal(load.pct, 100);
-  assert.equal(load.capacityLbs, 50, "the declared weight capacity is still reported");
+    const load = api.getContainerLoad(makeActor([quiver, arrows]), "quiver");
+    assert.equal(load.kind, "count");
+    assert.equal(load.count, 25);
+    assert.equal(load.capacityCount, 20);
+    assert.equal(load.isOver, true);
+    assert.equal(load.pct, 100);
+    assert.equal(load.capacityLbs, 50, "the declared weight capacity is still reported");
+  });
 });
 
 test("getContainerLoad copes with a container that declares no capacity", () => {
-  const container = { id: "bag", type: "container", flags: {} };
-  const api = buildPublicApi(makeDeps({
-    computeAdjustedLoad: () => ({ load: 7, trace: [] }),
-    getCapacityLbs: () => null
-  }));
+  withRuntime({}, () => {
+    const api = buildPublicApi();
+    const bag = makeItem({ id: "bag", type: "container" });
+    const book = makeItem({ id: "book", container: "bag", weight: 7 });
 
-  const load = api.getContainerLoad(makeActor(container), "bag");
-  assert.equal(load.hasCapacity, false);
-  assert.equal(load.capacity, null);
-  assert.equal(load.pct, null);
-  assert.equal(load.isOver, false);
-  assert.equal(load.load, 7);
+    const load = api.getContainerLoad(makeActor([bag, book]), "bag");
+    assert.equal(load.hasCapacity, false);
+    assert.equal(load.capacity, null);
+    assert.equal(load.pct, null);
+    assert.equal(load.isOver, false);
+    assert.equal(load.load, 7);
+  });
 });
 
 test("getContainerLoad returns null for unknown input", () => {
-  const api = buildPublicApi(makeDeps());
+  const api = buildPublicApi();
   assert.equal(api.getContainerLoad(null, "bag"), null);
-  assert.equal(api.getContainerLoad(makeActor({ id: "bag" }), null), null);
-  assert.equal(api.getContainerLoad(makeActor({ id: "bag" }), "missing"), null);
+  assert.equal(api.getContainerLoad(makeActor([makeItem({ id: "bag" })]), null), null);
+  assert.equal(api.getContainerLoad(makeActor([makeItem({ id: "bag" })]), "missing"), null);
+});
+
+test("getContainerRawPreviewWeight computes pre-reduction weight for actor, world, and compendium containers", () => {
+  withRuntime({ metric: true }, () => {
+    const bag = makeItem({ id: "bag", type: "container", units: "kg", reduction: 50 });
+    const sword = makeItem({ id: "sword", container: "bag", weight: 5, units: "lb" });
+    const actor = makeActor([bag, sword]);
+    bag.parent = actor;
+
+    // 5 lb = 2 kg raw in bag's kg units before bag's 50% reduction
+    assert.deepEqual(getContainerRawPreviewWeight(bag), { raw: 2, unit: "kg" });
+
+    // Unowned world container reads synchronous system.contents
+    const worldBag = makeItem({ id: "worldBag", type: "container", units: "lb", reduction: 50 });
+    worldBag.system.contents = [makeItem({ id: "gem", weight: 6, units: "lb" })];
+    assert.deepEqual(getContainerRawPreviewWeight(worldBag), { raw: 6, unit: "lb" });
+
+    // Compendium container with async contents returns null so UI falls back to sample weight
+    const compendiumBag = makeItem({ id: "compBag", type: "container", units: "lb" });
+    compendiumBag.system.contents = Promise.resolve([]);
+    assert.equal(getContainerRawPreviewWeight(compendiumBag), null);
+  });
+});
+
+test("debug api summarizes an actor's containers without exposing internal cache parameters", () => {
+  withRuntime({}, () => {
+    const debug = buildDebugApi();
+    const bag = makeItem({ id: "bag", name: "Pack", type: "container", capacity: 10, reduction: 50 });
+    const gem = makeItem({ id: "gem", container: "bag", weight: 8 });
+    const actor = makeActor([bag, gem]);
+
+    const origTable = console.table;
+    console.table = () => {};
+    try {
+      const result = debug.dumpActor(actor);
+      assert.equal(result.Pack.loadLbs, 4);
+      assert.equal(result.Pack.capacityLbs, 10);
+      assert.equal(result.Pack.reductionPct, 50);
+    } finally {
+      console.table = origTable;
+    }
+  });
 });
 
 test("installPublicApi publishes on the module entry and announces itself", () => {
@@ -165,7 +259,6 @@ test("installPublicApi publishes on the module entry and announces itself", () =
 
   try {
     const api = installPublicApi({
-      ...makeDeps(),
       debugApi: { dumpContainer() { return "dump"; } }
     });
 
@@ -205,7 +298,7 @@ test("api helpers survive a runtime without Hooks", () => {
 
   try {
     assert.doesNotThrow(() => notifyContainerRulesUpdated({}, {}));
-    assert.doesNotThrow(() => installPublicApi(makeDeps()));
+    assert.doesNotThrow(() => installPublicApi());
   } finally {
     globalThis.Hooks = previousHooks;
     globalThis.game = previousGame;

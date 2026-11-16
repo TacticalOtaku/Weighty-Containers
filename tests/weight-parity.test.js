@@ -12,14 +12,14 @@ import {
   createProjectedActor,
   findCapacityViolations
 } from "../scripts/core/containers.js";
-import { getCapacityCount, isWeightlessContainer } from "../scripts/core/weight.js";
 import {
   DEFAULT_UNIT_CONVERSION,
   convertWeightToLbs,
+  getCapacityCount,
+  isWeightlessContainer,
   lbsPerUnit,
-  resetUnitConversionTable,
-  setUnitConversionTable
-} from "../scripts/core/units.js";
+  normalizeUnitConversionTable
+} from "../scripts/core/weight.js";
 
 const item = ({
   id,
@@ -60,15 +60,17 @@ test("kilograms use dnd5e's 2.5 lb conversion, not the physical one", () => {
   assert.equal(DEFAULT_UNIT_CONVERSION.kg, 2.5);
 });
 
-test("the conversion table can be replaced from CONFIG.DND5E.weightUnits", t => {
-  t.after(() => resetUnitConversionTable());
-  setUnitConversionTable({ kg: { conversion: 3 }, st: { conversion: 14 }, bad: { conversion: 0 } });
-  assert.equal(lbsPerUnit("kg"), 3);
-  assert.equal(lbsPerUnit("st"), 14);
-  assert.equal(lbsPerUnit("bad"), null, "a zero factor is rejected, leaving the unit unknown");
-  assert.equal(convertWeightToLbs(3, "bad"), 3, "unknown units pass through unchanged");
-  resetUnitConversionTable();
-  assert.equal(lbsPerUnit("kg"), 2.5);
+test("unit conversion tables are normalized statelessly from CONFIG.DND5E.weightUnits", () => {
+  const unitTable = normalizeUnitConversionTable({
+    kg: { conversion: 3 },
+    st: { conversion: 14 },
+    bad: { conversion: 0 }
+  });
+  assert.equal(lbsPerUnit("kg", unitTable), 3);
+  assert.equal(lbsPerUnit("st", unitTable), 14);
+  assert.equal(lbsPerUnit("bad", unitTable), null, "a zero factor is rejected, leaving the unit unknown");
+  assert.equal(convertWeightToLbs(3, "bad", "lb", unitTable), 3, "unknown units pass through unchanged");
+  assert.equal(lbsPerUnit("kg"), 2.5, "default conversion table stays untouched");
 });
 
 test("a container's reduction reaches items in its sub-containers", () => {
