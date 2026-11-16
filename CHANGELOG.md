@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.10.1
+
+### Fixed
+- `containerCurrencyLbs` fallback for plain-object projections (without a live `system.currencyWeight` getter) now converts from the world display unit instead of the container's `weight.units`, preventing coin weight drift in metric worlds when `weight.units` differs.
+- Unguarded `game.settings.get` reads during enforcement (`enforceMode`, `includeNested`) now use the shared safe settings reader with canonical defaults.
+- `directContentsWeight` now respects the system display unit when a container's `weight.units` is unset and shares core load arithmetic with capacity enforcement.
+
+### Changed
+- Consolidated host-bound container operations into `scripts/foundry/containers.js`, removing pass-through injection bags from `api.js` and `debug.js`, internal cache parameters from `api.computeAdjustedLoad`, and duplicate host wiring from `main.js` and `enforcement.js`.
+- Merged unit conversion into stateless `scripts/core/weight.js`, consolidated rule schema, flag persistence mapping, restriction validation, and rule presets into `scripts/core/rules.js`, and moved dnd5e catalog and label resolution into `scripts/integrations/dnd5e.js`.
+- Inlined single-caller UI modules into `container-rules-app.js` and unified multiselect rendering and interaction in `scripts/ui/container-rules-multiselect.js`.
+- Added Playwright Chromium/Edge fallback launcher (`tools/launch-browser.mjs`) for `tools/preview-ui.mjs` and `tools/check-multiselect.mjs`.
+
 ## 3.10.0
 
 ### Added
