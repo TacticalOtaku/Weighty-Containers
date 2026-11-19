@@ -1,0 +1,59 @@
+name: Bug report
+description: Report a bug or compatibility issue in Weighty Containers
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: input
+    id: module_version
+    attributes:
+      label: Weighty Containers version
+      placeholder: "e.g. 1.0.0"
+    validations:
+      required: true
+  - type: input
+    id: foundry_version
+    attributes:
+      label: Foundry VTT version
+      placeholder: "e.g. 14.367"
+    validations:
+      required: true
+  - type: input
+    id: system_version
+    attributes:
+      label: D&D 5e system version
+      placeholder: "e.g. 5.3.3"
+    validations:
+      required: true
+  - type: dropdown
+    id: user_role
+    attributes:
+      label: User role
+      options:
+        - Gamemaster
+        - Player
+        - Both / Dedicated host
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Clear description of the bug, expected behavior, and actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      value: |
+        1. 
+        2. 
+        3. 
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Browser console logs / screenshots
+      description: Press F12 in Foundry and paste any errors or module debug output.
+      render: text

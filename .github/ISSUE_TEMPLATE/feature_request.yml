@@ -1,0 +1,19 @@
+name: Feature request
+description: Suggest an idea or improvement for Weighty Containers
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Use case / problem
+      description: What workflow or problem would this improve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe how you would like it to work.
+    validations:
+      required: true

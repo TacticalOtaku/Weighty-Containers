@@ -1,13 +1,12 @@
 /**
  * Release rules for module.json, shared by the packaging script and its tests. They follow the other TacticalOtaku
- * modules: Foundry reads the manifest from the main branch; the download URL points at this version's release asset.
+ * modules: Foundry reads the manifest from the latest GitHub release; the download URL points at this version's release archive.
  */
 export function releaseUrls(repository, id, version) {
   const base = repository.replace(/\/+$/, "");
-  const raw = base.replace(/^https:\/\/github\.com\//, "https://raw.githubusercontent.com/");
   return {
     url: base,
-    manifest: `${raw}/main/module.json`,
+    manifest: `${base}/releases/latest/download/module.json`,
     download: `${base}/releases/download/v${version}/${archiveName(id, version)}`,
   };
 }

@@ -5,3 +5,6 @@ docs/
 lang/
 templates/
 CLAUDE.md
+AGENTS.md
+release-notes/
+.claude/

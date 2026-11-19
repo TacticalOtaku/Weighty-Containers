@@ -1,194 +1,146 @@
+**English** · [Русский](README.ru.md)
+
 # Weighty Containers
 
-**Управление весом, вместимостью и содержимым контейнеров в Foundry VTT для D&D5e.**
+**Container weight reduction, capacity enforcement, and content rules for D&D 5e in Foundry VTT.**
 
-Настройте сумку, уменьшающую вес содержимого, колчан только для боеприпасов
-или оружейную стойку с ограничениями по свойствам предметов. Модуль учитывает
-правила при помещении предметов в контейнер и передаёт снижение веса в расчёты системы.
+Configure a bag that reduces the weight of its contents, a quiver restricted to ammunition,
+or a weapon rack filtered by item properties. Weighty Containers enforces rules when items
+enter containers and feeds reduced weights straight into dnd5e's native encumbrance calculations.
 
-**Версия:** 3.10.1 · **Языки интерфейса:** русский и английский · **Автор:** TacticalOtaku
+**Version:** 3.10.1 · **Languages:** English, Russian · **Author:** TacticalOtaku
 
-[Установка](#установка) · [Быстрый старт](#быстрый-старт) · [Настройки](#настройки-модуля) · [API](API.md) · [Дизайн-система](DESIGN.md)
+[![Foundry VTT](https://img.shields.io/badge/Foundry_VTT-v14_(14.367)-2b6cb0?style=flat-square)](https://foundryvtt.com/)
+[![D&D 5e](https://img.shields.io/badge/D%26D_5e-5.3.3-b91c1c?style=flat-square)](https://github.com/foundryvtt/dnd5e)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-3b82f6?style=flat-square)](LICENSE)
 
-## Возможности
+[Installation](#installation) · [Quick Start](#quick-start) · [Settings](#module-settings) · [API](API.md) · [Design System](DESIGN.md)
 
-- **Снижение веса от 0 до 100%.** Ползунок, числовой ввод и предварительный расчёт результата.
-- **Контроль вместимости.** Проверка ограничений по весу или количеству предметов, заданных у контейнера.
-- **Правила содержимого.** Разрешённые типы, категории и подтипы предметов.
-- **Правила свойств.** Обязательные и запрещённые свойства D&D5e; соответствие всем обязательным свойствам или хотя бы одному.
-- **Вложенные контейнеры.** Учёт содержимого вложенных сумок и проверка вместимости внешних контейнеров.
-- **Готовые пресеты.** Быстрая настройка распространённых вариантов контейнеров.
-- **Блокировка или предупреждение.** Выбор поведения при нарушении правил и получателей уведомлений.
-- **Светлая и тёмная темы.** Следование теме Foundry или отдельный ручной выбор для модуля.
-- **Удобное редактирование.** Поиск в списках, множественный выбор, резюме правил, подсветка конфликтов и предупреждение о несохранённых изменениях.
-- **Доступ для игроков.** Владельцы контейнеров могут просматривать правила; изменять их может Мастер.
+## Features
 
-## Совместимость
+- **Weight reduction from 0% to 100%.** Slider, numeric input, and live result preview.
+- **Capacity enforcement.** Enforces weight and item-count limits defined on dnd5e containers.
+- **Content restrictions.** Filter allowed item types, categories, and subtypes.
+- **Property rules.** Required and forbidden dnd5e item properties, matching either all required properties or any one.
+- **Nested containers.** Accounts for nested container contents when checking outer container capacity.
+- **Built-in presets.** One-click setups for common fantasy containers.
+- **Block or warn mode.** Choose whether violations block moves or warn, and who sees rejection notices.
+- **Light & dark themes.** Follow Foundry's window theme or override it per client.
+- **Ergonomic editor.** Searchable multiselect lists, rule summary bar, conflict highlighting, and unsaved-changes guard.
+- **Player read access.** Container owners can inspect active rules read-only; only GMs can edit them.
 
-| Компонент | Минимальная версия | Версия, указанная как проверенная в манифесте |
+## Compatibility
+
+| Component | Minimum | Verified in manifest |
 | --- | --- | --- |
 | Foundry VTT | 14 | 14.367 |
-| Система D&D5e | 5.3.3 | 5.3.3 |
+| D&D 5e system | 5.3.3 | 5.3.3 |
 
-Обязательных зависимостей среди модулей нет. **socketlib** поддерживается
-опционально; без него используются штатные сокеты Foundry. **libWrapper не требуется.**
+No required module dependencies. **socketlib** is supported optionally (native Foundry sockets are used when absent). **libWrapper is not required.**
 
-С **Item Piles** (и его мостом **Item Piles: D&D 5e**) переносы, торговля и «взять всё» проверяются до того,
-как Item Piles что-либо перенесёт: если предмет не помещается или нарушает правила контейнера, операция
-отменяется целиком и ничего не теряется. Контейнер, переносимый вместе с содержимым, проверяется с полным весом.
-В режиме «Только предупреждать» модуль показывает предупреждение, и перенос выполняется.
+With **Item Piles** (and **Item Piles: D&D 5e**), transfers, trades, and "Take All" actions are validated before Item Piles moves anything: if an item exceeds capacity or breaks container rules, the operation cancels cleanly without losing items. Containers moved with contents are weighed full; in warn mode a warning is shown and the transfer proceeds.
 
-Модуль разработан для системы D&D5e. Совместимость с другими игровыми системами не заявлена.
+Designed for **D&D 5e**; other game systems are not supported.
 
-## Установка
+## Installation
 
-1. На экране настройки Foundry откройте **Add-on Modules → Install Module**.
-2. Вставьте адрес ниже в поле **Manifest URL** и нажмите **Install**.
-3. Откройте игровой мир с системой D&D5e.
-4. В **Manage Modules** включите **Weighty Containers** и сохраните настройки.
+1. In Foundry VTT Setup, open **Add-on Modules → Install Module**.
+2. Paste the **Manifest URL** below and click **Install**.
+3. Open a D&D 5e world, go to **Manage Modules**, and enable **Weighty Containers**.
 
 ```text
-https://raw.githubusercontent.com/TacticalOtaku/Weighty-Containers/main/module.json
+https://github.com/TacticalOtaku/Weighty-Containers/releases/latest/download/module.json
 ```
 
-Архивы версий доступны в разделе [Releases](https://github.com/TacticalOtaku/Weighty-Containers/releases).
-Для ручной установки распакуйте содержимое архива в `Data/modules/weighty-containers`:
-файл `module.json` должен находиться непосредственно в этой папке.
+Release archives are also available on [GitHub Releases](https://github.com/TacticalOtaku/Weighty-Containers/releases).
+For manual installation, extract the archive into `Data/modules/weighty-containers` so `module.json` sits directly inside that folder.
 
-## Быстрый старт
+## Quick Start
 
-1. Войдите в мир как **Мастер** и откройте лист предмета типа **Container / Контейнер**.
-2. Нажмите кнопку с шестерёнкой **«Правила контейнера»** в заголовке окна листа,
-   рядом с кнопками управления окном.
-3. Установите процент снижения веса. Поле результата показывает вес текущего
-   содержимого, когда он доступен; иначе используется пример веса.
-4. При необходимости примените пресет или задайте ограничения вручную.
-5. Проверьте резюме внизу окна и нажмите **«Сохранить»**.
+1. Log in as **Gamemaster** and open a **Container** item sheet.
+2. Click the gear button (**Container Rules**) in the sheet header next to window controls.
+3. Set the weight reduction percentage. The preview uses live contents weight when available or a sample weight otherwise.
+4. Optionally apply a preset or configure type/subtype/property restrictions.
+5. Review the summary footer and click **Save**.
 
-Вместимость задаётся в штатных настройках самого контейнера D&D5e.
-Правила модуля дополняют эти настройки.
+Capacity itself is configured in dnd5e's native container fields; Weighty Containers builds on top of those settings.
+Owning players see an eye button to inspect container rules in read-only mode without modifying them.
 
-Игроку-владельцу доступна кнопка просмотра с символом глаза. В режиме просмотра
-можно переключать вкладки и тему, открывать списки и искать в них, но нельзя
-изменять правила.
+## How Rules Work
 
-## Как работают правила
+### Weight
 
-### Вес
+Reduction scales the counted weight of the container's **contents**, never the container's own base weight.
+At 50% reduction, 20 lb of contents contribute 10 lb, added to the bag's own weight.
 
-Процент снижает учитываемый вес **содержимого**, а не собственный вес контейнера.
-При снижении на 50% предметы общим весом 20 фунтов дают 10 фунтов содержимого;
-собственный вес сумки учитывается отдельно.
+The module patches dnd5e's `ContainerData#contentsWeight` getter, so capacity bars, container totals, and actor encumbrance all reflect the reduction natively. Nested reductions compound down the chain. Containers with dnd5e's `weightlessContents` property (such as a Bag of Holding) contribute zero content weight to their carrier while still tracking their own internal capacity as on the dnd5e sheet.
 
-Снижение включается в системный расчёт `contentsWeight`, на котором D&D5e
-строит вес контейнера, показатель вместимости и нагрузку персонажа.
-Вложенные снижения могут применяться последовательно. Системное свойство
-`weightlessContents` (например, у сумки хранения) убирает содержимое из веса
-того, кто несёт контейнер, но собственная вместимость контейнера по-прежнему
-считается по содержимому — как на шкале вместимости D&D5e.
+Unit conversions follow `CONFIG.DND5E.weightUnits` (e.g., `1 kg = 2.5 lb` in metric dnd5e worlds). Container coins use the container's `weight.units`, while actor coins use the world display unit. See [API.md](API.md#weight) for calculation details.
 
-Модуль использует единицы и коэффициенты преобразования D&D5e, чтобы значения
-совпадали с листами системы. Монеты в контейнере считаются в единицах контейнера,
-монеты персонажа — в единицах отображения, как на листе; в метрическом мире
-1 кг = 2,5 фунта. Подробности расчётов приведены в [API.md](API.md#weight).
+### Content Restrictions
 
-### Ограничения содержимого
+On the **Restrictions** tab, pick allowed item types and subtypes/categories. Available subtypes follow the selected types (including ammunition subtypes like arrows and bolts). Leaving a list empty imposes no restriction for that dimension. Item properties are checked strictly on the **Properties** tab and do not satisfy subtype rules.
 
-На вкладке **«Ограничения»** выберите разрешённые типы и категории/подтипы.
-Список категорий зависит от выбранных типов; для боеприпасов доступны и
-подтипы вроде стрел и болтов. Пустой выбор не ограничивает соответствующий
-параметр. Свойства предметов проверяются только на вкладке «Свойства» и не
-засчитываются как подтипы.
+### Properties
 
-Если после изменения типов ранее выбранные категории стали недоступны,
-окно покажет предупреждение и предложит показать или удалить эти значения.
+On the **Properties** tab, configure:
 
-### Свойства
+- **Required properties:** an item must carry either **all** listed properties or **at least one**, depending on the match mode.
+- **Forbidden properties:** matching any single forbidden property rejects the item.
 
-На вкладке **«Свойства»** задайте:
+Saving is blocked with a clear conflict message if the same property is both required and forbidden.
 
-- **Обязательные свойства:** предмет должен иметь все выбранные свойства
-  либо хотя бы одно — в зависимости от режима соответствия.
-- **Запрещённые свойства:** достаточно любого совпадения, чтобы предмет нарушал правило.
+## Built-in Presets
 
-Пустые списки не добавляют требований. Если одно свойство одновременно
-обязательно и запрещено, сохранение недоступно до исправления конфликта.
-
-Названия типов и свойств берутся из каталогов системы. Часть названий может
-отображаться на английском даже при русском интерфейсе модуля.
-
-## Пресеты
-
-| Пресет | Изменения |
+| Preset | Changes applied |
 | --- | --- |
-| Сумка хранения | Снижение веса содержимого на 100% |
-| Вес вдвое | Снижение веса содержимого на 50% |
-| Колчан | Расходуемые предметы с подтипом боеприпасов |
-| Пояс зелий | Расходуемые предметы с подтипом зелий |
-| Оружейная стойка | Предметы типа «Оружие» |
-| Без магии | Запрет свойства `mgc` |
-| Сбросить всё | Сброс снижения веса и ограничений, режим обязательных свойств «Все» |
+| Bag of Holding | 100% content weight reduction |
+| Half Weight | 50% content weight reduction |
+| Quiver | Consumables with ammunition subtype |
+| Potion Belt | Consumables with potion subtype |
+| Weapon Rack | Weapon items only |
+| No Magic | Forbids the `mgc` property |
+| Reset All | Clears reduction and restrictions; resets required match mode to All |
 
-Пресет меняет только перечисленные в нём параметры. Например, **«Колчан»**
-сохраняет уже настроенный процент снижения веса. Применённые изменения нужно
-сохранить кнопкой **«Сохранить»**.
+Presets only overwrite the fields they define (for example, applying **Quiver** preserves your existing weight reduction). Remember to click **Save** after applying a preset.
 
-Названия пресетов описывают настройку: модуль не создаёт предметы и не
-реализует дополнительные эффекты магических предметов.
+## Module Settings
 
-## Настройки модуля
+Open Foundry **Module Settings → Weighty Containers**:
 
-Откройте настройки Foundry и найдите раздел **Weighty Containers**.
-
-| Настройка | Назначение | По умолчанию |
+| Setting | Purpose | Default |
 | --- | --- | --- |
-| Поведение при превышении | Блокировать действие или только предупреждать о нарушении вместимости/правил | Блокировать |
-| Учитывать вложенные контейнеры | Содержимое вложенных контейнеров входит во вместимость внешнего. Если выключено, вложенный контейнер учитывается только своим весом — и при проверке, и на шкале вместимости; переносимый вес не меняется | Включено |
-| Кто видит отказы | Только действующий игрок; действующий игрок, владельцы и ГМы; либо все | Действующий игрок, владельцы и ГМы |
-| Тема окон | Авто, светлая или тёмная | Авто |
-| Текст уведомления о превышении | Текст ГМа вместо стандартного сообщения о вместимости для всех игроков. Подстановки: `{containerName}`, `{before}`, `{delta}`, `{capacity}`, `{unit}` | Стандартное сообщение |
-| Уровень логирования | Подробность диагностических записей | Предупреждения |
+| **Over-capacity behavior** | Block violating actions or warn only | Block |
+| **Include nested containers** | Count nested container contents toward outer capacity (disabling weighs sub-containers by own weight only; actor encumbrance stays accurate) | Enabled |
+| **Who sees rejections** | Acting player only; acting player, owners & GMs; or everyone | Acting player, owners & GMs |
+| **Window theme** | Auto, Light, or Dark | Auto |
+| **Custom exceed message** | GM override for capacity rejection text (`{containerName}`, `{before}`, `{delta}`, `{capacity}`, `{unit}`) | Default message |
+| **Log level** | Diagnostic verbosity in browser console | Warnings |
 
-Настройки правил и уведомлений относятся к игровому миру. Тема и параметры
-диагностики сохраняются отдельно для клиента.
+## Interface & Themes
 
-## Интерфейс и темы
-
-Окна используют дизайн-систему **Anvil**: нейтральные поверхности, янтарный
-акцент, читаемые подписи и короткие анимации взаимодействия.
-
-Переключатель внизу окна позволяет выбрать **«Авто»**, **«Светлая»** или
-**«Тёмная»**. Автоматический режим следует теме окон Foundry; ручной выбор
-переопределяет её для окон модуля. Изменение темы не сбрасывает черновик правил.
-
-Интерфейс адаптируется к ширине окна, поддерживает клавиатуру и учитывает
-системную настройку уменьшенного движения.
+Windows follow the **Anvil** design system: neutral surfaces, brass-amber accents, crisp labels, keyboard navigation, and reduced-motion support.
 
 <details>
-<summary>Превью светлой и тёмной тем</summary>
+<summary>Light & dark theme previews</summary>
 
-Изображения ниже получены на демонстрационных данных с шаблонами модуля и CSS Foundry.
+![Dark theme — presets](docs/preview/dark-880-presets.png)
 
-![Тёмная тема — пресеты](docs/preview/dark-880-presets.png)
-
-![Светлая тема — свойства](docs/preview/light-880-properties.png)
+![Light theme — properties](docs/preview/light-880-properties.png)
 
 </details>
 
-Токены, компоненты, правила анимации и инструкция переноса оформления
-в другие модули описаны в [DESIGN.md](DESIGN.md).
+Design tokens and porting guidelines are documented in [DESIGN.md](DESIGN.md).
 
-## Для разработчиков
+## Developer API
 
-Модуль предоставляет **Public API v2** для получения загрузки и вместимости,
-проверки правил, открытия окна настроек и регистрации собственных пресетов.
-API доступен после готовности модуля:
+Weighty Containers exposes **Public API v2** for querying load/capacity, validating restrictions, opening the rules window, and registering custom presets:
 
 ```js
 Hooks.once("weighty-containers.ready", api => {
   api.registerRulePreset({
     id: "my-module.scroll-case",
-    label: "Футляр для свитков",
+    label: "Scroll Case",
     icon: "fas fa-scroll",
     config: {
       allowedTypes: ["consumable"],
@@ -198,34 +150,30 @@ Hooks.once("weighty-containers.ready", api => {
 });
 ```
 
-Полное описание методов, событий и миграции с API v1: [API.md](API.md).
+Full API documentation: [API.md](API.md).
 
-### Проверки
+### Development Checks
 
-Исходники используют JavaScript ES modules; отдельная сборка для запуска в Foundry не требуется.
-Нужен Node.js 24 или новее.
+Requires **Node.js 24+** (vanilla ES modules, no build step needed):
 
 ```sh
 npm install
-npm run check    # ESLint и тесты node --test
-npm run deploy   # копия модуля в %LOCALAPPDATA%/FoundryVTT/Data/modules/weighty-containers (или FOUNDRY_DATA, --data <путь>)
-npm run release  # check, затем dist/weighty-containers-v<версия>.zip
+npm run check    # ESLint and node --test suite
+npm run deploy   # Copy module into Foundry Data/modules/weighty-containers
+npm run release  # Check and package dist/weighty-containers-v<version>.zip
 ```
 
-`npm run release` отказывается упаковывать модуль, если версия, ссылки или файлы в `module.json`
-не совпадают с `package.json`.
+Manual Foundry verification checklist: [tests/manual/foundry-v14-smoke.md](tests/manual/foundry-v14-smoke.md).
 
-Сценарий проверки в игровом мире: [Foundry V14 smoke test](tests/manual/foundry-v14-smoke.md).
+## Reporting Issues & Contributing
 
-## Сообщить о проблеме
+Pull Requests are disabled on this repository. Please report bugs or suggest features via [GitHub Issues](https://github.com/TacticalOtaku/Weighty-Containers/issues) (see [CONTRIBUTING.md](CONTRIBUTING.md)) and include:
 
-Создайте [issue](https://github.com/TacticalOtaku/Weighty-Containers/issues) и укажите:
+- Foundry VTT, D&D 5e, and Weighty Containers versions;
+- reproduction steps, expected vs. actual behavior, and user role (GM/Player);
+- container rules, affected items, weight units, and whether nested containers are involved;
+- console errors and output from `weightyCont.dumpLog()`.
 
-- версии Foundry, D&D5e и Weighty Containers;
-- шаги воспроизведения, ожидаемый и фактический результат;
-- роль пользователя: Мастер или игрок;
-- правила контейнера и затронутые предметы;
-- снимок экрана и относящиеся к проблеме ошибки консоли, если они есть;
-- вывод `weightyCont.dumpLog()` из консоли браузера — последние записи лога модуля.
+## License
 
-Для ошибок веса дополнительно укажите используемые единицы и наличие вложенных контейнеров.
+Released under the **GNU General Public License v3.0** ([LICENSE](LICENSE)).

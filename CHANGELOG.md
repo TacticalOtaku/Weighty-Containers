@@ -80,7 +80,7 @@
 - `npm run release` validates `module.json` and writes `dist/weighty-containers-v<version>.zip`; it never replaces an
   existing archive.
 - Font Awesome classes use the current `fa-solid` names.
-- Architecture notes in `docs/architecture.md`, project rules in `CLAUDE.md`.
+- Architecture notes in `docs/architecture.md`.
 
 ## 3.6.0 and earlier
 

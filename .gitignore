@@ -3,3 +3,10 @@ dist/
 *.zip
 
 CLAUDE.md
+AGENTS.md
+docs/agents/
+docs/plans/
+docs/superpowers/
+release-notes/
+.claude/
+.DS_Store

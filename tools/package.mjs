@@ -1,7 +1,6 @@
 /**
  * Build a Foundry release: validates module.json, then writes dist/<id>-v<version>.zip with module.json at the
- * archive root, as Foundry expects. Foundry reads the manifest from the repository's main branch, so only the
- * archive is attached to the GitHub release v<version>. Run through `npm run release`, which checks first.
+ * archive root, as Foundry expects. Attach both the archive and module.json to the GitHub release v<version>. Run through `npm run release`, which checks first.
  */
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
@@ -47,4 +46,4 @@ await writeFile(target, zip);
 
 console.log(`Packaged ${manifest.id} ${manifest.version}: ${files.length} files, ${(zip.length / 1024).toFixed(1)} KiB`);
 console.log(`  ${target}`);
-console.log(`Push module.json to main and attach the archive to the GitHub release v${manifest.version}.`);
+console.log(`Attach the archive and module.json to the GitHub release v${manifest.version}.`);
