@@ -178,6 +178,14 @@ npm run release  # Run check and package
 
 ---
 
+## AI Disclosure
+
+AI-assisted tools were used during development for tasks such as code drafting, refactoring, tests, documentation, and localization drafts. All architecture, code, behavior, user-facing copy, and Russian/English translations are reviewed, tested, and maintained by **TacticalOtaku**, who retains sole authorship and responsibility for the module.
+
+All bundled package assets and user-facing materials comply with Foundry VTT's [AI Content Policy](https://foundryvtt.com/article/ai-policy/) — no pre-generated AI art, audio, or lore assets are included.
+
+---
+
 ## Feedback & License
 
 Pull Requests are disabled on this repository. Please report bugs or suggest features via [GitHub Issues](https://github.com/TacticalOtaku/Weighty-Containers/issues) (see [CONTRIBUTING.md](CONTRIBUTING.md)) and include:

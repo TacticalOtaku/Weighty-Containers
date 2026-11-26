@@ -16,6 +16,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Node.js
@@ -46,10 +47,53 @@ jobs:
       - name: Build release archive
         run: npm run package
 
+      - name: Generate release notes
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const { execFileSync } = require("node:child_process");
+            const mod = JSON.parse(fs.readFileSync("module.json", "utf8"));
+            const version = mod.version;
+            const tag = process.env.GITHUB_REF_NAME || `v${version}`;
+            const repo = process.env.GITHUB_REPOSITORY;
+            const changelog = fs.readFileSync("CHANGELOG.md", "utf8");
+            const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            const headingRe = new RegExp(`^##\\s+\\[?v?${escaped}\\]?(?:\\s|$).*$`, "m");
+            const match = headingRe.exec(changelog);
+            if (!match) throw new Error(`CHANGELOG.md does not contain a section for ${version}`);
+            const after = changelog.slice(match.index + match[0].length);
+            const nextHeading = after.search(/^##\s+/m);
+            const body = (nextHeading === -1 ? after : after.slice(0, nextHeading)).trim();
+            if (!body) throw new Error(`CHANGELOG.md section for ${version} is empty`);
+            const tags = execFileSync("git", ["tag", "--sort=-v:refname"], { encoding: "utf8" })
+              .split(/\r?\n/)
+              .map((t) => t.trim())
+              .filter((t) => /^v?\d+\.\d+\.\d+$/.test(t));
+            const idx = tags.indexOf(tag);
+            const prevTag = idx !== -1 && idx + 1 < tags.length ? tags[idx + 1] : null;
+            const lines = [
+              `## ${version}`,
+              "",
+              body,
+              "",
+              "---",
+              "",
+              `- **Changelog:** [CHANGELOG.md](https://github.com/${repo}/blob/main/CHANGELOG.md)`,
+            ];
+            if (prevTag) {
+              lines.push(`- **Full Diff:** [${prevTag}...${tag}](https://github.com/${repo}/compare/${prevTag}...${tag})`);
+            }
+            fs.mkdirSync("dist", { recursive: true });
+            fs.writeFileSync("dist/release-notes.md", lines.join("\n") + "\n");
+          '
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
-          generate_release_notes: true
+          body_path: dist/release-notes.md
           files: |
             dist/*.zip
             module.json
